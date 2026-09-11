@@ -1,0 +1,133 @@
+# Switch Vitrine
+
+<p align="center">
+  <img src="logo.png" alt="Switch Vitrine Logo" width="180">
+</p>
+
+<p align="center">
+  <strong>Um applet homebrew moderno e fluido para descoberta de jogos no Nintendo Switch.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Versão-1.2.0-blue.svg" alt="Versão 1.2.0">
+  <img src="https://img.shields.io/badge/Plataforma-Nintendo%20Switch-e60012.svg" alt="Nintendo Switch">
+  <img src="https://img.shields.io/badge/Linguagem-C%2B%2B17%20%7C%20libnx-00599C.svg" alt="C++17 / libnx">
+  <img src="https://img.shields.io/badge/UI-SDL2-228B22.svg" alt="SDL2">
+</p>
+
+---
+
+> [!IMPORTANT]
+> **Aviso Legal:** O Switch Vitrine é exclusivamente um catálogo informativo e interativo para navegar, pesquisar, consultar notas e gerenciar sua lista pessoal de jogos. **Ele NÃO baixa, instala, distribui nem executa jogos.**
+
+---
+
+## ✨ Funcionalidades
+
+- **Design Elegante e Foco na Arte**: Grade com 5 capas verticais em destaque, transições dinâmicas de foco (escala, elevação, brilho) e animações suaves de entrada.
+- **Visualização Alternativa (Modo Clássico)**: Alterne a qualquer momento para a visualização em lista/cards detalhados pressionando o analógico direito (`R3`).
+- **Descoberta Inteligente**: Navegue por seções organizadas na aba inicial:
+  - *Todos*: Catálogo completo filtrável.
+  - *Populares*: Títulos em destaque no momento.
+  - *Lançamentos*: Datas oficiais para Nintendo Switch.
+  - *Bem avaliados*: Jogos com nota crítica agregada 80+ e amostragem consistente.
+  - *Indies*: O melhor da cena independente.
+  - *Joias escondidas*: Curadoria de alta pontuação e menor exposição comercial.
+- **Filtros e Ordenação Avançada**: Filtragem por gênero, tema e múltiplos modos de ordenação (Maior score, Mais populares, A-Z, Mais curtos e Lançamentos).
+- **Ficha Editorial Completa**: Detalhes com desenvolvedora, publicadora, tempo de jogo estimado para créditos e 100%, classificação indicativa, modos de jogo, perspectivas e franquias.
+- **Galeria de Screenshots**: Até 6 capturas de tela por jogo carregadas em segundo plano, com suporte a visualização em tela cheia.
+- **Minha Lista (Backlog Persistente)**: Acompanhe seu progresso categorizando jogos como *Quero jogar*, *Jogando*, *Finalizado* ou *Abandonado*, com indicadores diretos na grade.
+- **Aba de Favoritos**: Acesso rápido à sua seleção pessoal independente de conexão com a internet.
+- **Surpreenda-me**: Sorteio aleatório de títulos respeitando os filtros e abas ativas.
+- **Busca Rápida**: Integração nativa com o teclado virtual oficial do Switch.
+- **Desempenho e Cache Offline**: Sistema de fila de downloads não bloqueante para capas e capturas, com persistência local no cartão SD para carregamento instantâneo.
+
+---
+
+## 🎮 Controles
+
+| Comando | Ação |
+| :--- | :--- |
+| **Direcional / Analógico** | Navegar entre as capas / opções |
+| **A** | Abrir detalhes do jogo selecionado / Confirmar |
+| **B** | Voltar / Fechar tela de detalhes |
+| **X** | Abrir painel de filtros |
+| **Y** | Abrir pesquisa por texto (na Home) / Buscar jogos semelhantes (nos Detalhes) |
+| **L / R** | Alternar entre as abas (*Explorar*, *Minha lista*, *Favoritos*) ou categorias de filtros |
+| **ZL** | **Surpreenda-me** (sortear jogo com base nos filtros) |
+| **ZR** | Alterar status no backlog (*Minha lista*) |
+| **L3 (Pressionar Analógico Esquerdo)** | Adicionar / Remover dos Favoritos |
+| **R3 (Pressionar Analógico Direito)** | Alternar entre visualização de **Capas** e **Modo Clássico** |
+| **- (Menos)** | Abrir tela *Sobre*, checagem de conexão e manutenção de cache |
+| **+ (Mais)** | Sair do aplicativo |
+
+---
+
+## 📦 Instalação
+
+1. Acesse a aba de **Releases** do projeto e baixe a versão mais recente do arquivo `switch-vitrine.nro`.
+2. Insira o cartão micro SD do seu Nintendo Switch no computador.
+3. Copie o arquivo `switch-vitrine.nro` para a pasta:
+   ```text
+   /switch/switch-vitrine/switch-vitrine.nro
+   ```
+4. Insira o cartão SD de volta no console e inicie o aplicativo pelo **Homebrew Menu**.
+
+> [!TIP]
+> Para obter a melhor performance e garantir que o app tenha acesso a toda a memória RAM disponível, inicie o Homebrew Menu através de **Title Override** (segurando o botão `R` ao abrir qualquer jogo instalado) em vez do modo Applet via Álbum.
+
+---
+
+## 🛠️ Como Compilar
+
+### Pré-requisitos
+Certifique-se de ter o ambiente [devkitPro](https://devkitpro.org/) instalado e configurado com a toolchain do Nintendo Switch (`devkitA64`).
+
+Instale as dependências necessárias via `dkp-pacman`:
+```bash
+dkp-pacman -S switch-dev switch-sdl2 switch-sdl2_ttf switch-sdl2_image \
+  switch-freetype switch-curl switch-jansson
+```
+
+### Compilação do App (.nro)
+No terminal do devkitPro (MSYS2):
+```bash
+make
+```
+O arquivo gerado será `switch-vitrine.nro` na raiz do repositório.
+
+### Testes da Lógica no PC
+A lógica de ordenação, catálogo e modelos pode ser testada localmente em qualquer computador com CMake, sem necessidade de emulador ou SDK do Switch:
+```bash
+cmake -S . -B build-tests
+cmake --build build-tests
+ctest --test-dir build-tests --output-on-failure
+```
+
+---
+
+## 📁 Estrutura do Repositório
+
+```text
+├── include/              # Cabeçalhos C++ (modelos de dados, catálogo, cliente de API)
+├── source/               # Implementações C++ e interface SDL2
+├── romfs/                # Recursos embarcados na compilação do NRO (ícones, logos)
+├── tests/                # Testes unitários para execução no desktop (CMake)
+├── CMakeLists.txt        # Configuração de compilação dos testes de desktop
+├── Makefile              # Regras de build para Nintendo Switch (devkitPro/libnx)
+└── README.md             # Este documento público
+```
+
+---
+
+## 🤝 Créditos e Agradecimentos
+
+- Comunidade [devkitPro](https://devkitpro.org/) e [switchbrew](https://github.com/switchbrew/switch-examples) pela toolchain e biblioteca `libnx`.
+- Projeto [SDL2](https://www.libsdl.org/) pela base gráfica multiplataforma.
+- Dados de catálogo fornecidos via API [IGDB](https://www.igdb.com/).
+
+---
+
+<p align="center">
+  Desenvolvido por <strong>Mateus Mendes</strong>
+</p>

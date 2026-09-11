@@ -1,0 +1,32 @@
+# Nintendo Switch build
+build/
+build*/
+*.elf
+*.nacp
+*.nro
+*.map
+*.o
+*.obj
+*.d
+*.a
+*.exe
+
+# IDEs e Sistema Operacional
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+runtime/
+
+# Segredos e Configurações locais
+include/dev_secrets.hpp
+include/dev_secrets.hpp.example
+*.env
+*.env.*
+
+# Documentação local / Notas de desenvolvimento
+README.dev.md
+
+# Worker
+worker/
+

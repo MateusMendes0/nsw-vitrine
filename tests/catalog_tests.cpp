@@ -1,0 +1,62 @@
+#include "catalog.hpp"
+
+#include <cassert>
+#include <iostream>
+
+int main() {
+    vitrine::Catalog catalog;
+    assert(catalog.all().size() == 10);
+
+    vitrine::CatalogFilter filter;
+    filter.query = "rpg";
+    auto games = catalog.filtered(filter);
+    assert(games.size() == 3);
+
+    filter.query = "estrategia";
+    games = catalog.filtered(filter);
+    assert(games.size() == 2);
+
+    filter.query.clear();
+    filter.genre = "Aventura";
+    games = catalog.filtered(filter);
+    assert(games.size() == 4);
+
+    filter.genre.clear();
+    filter.sort = vitrine::SortMode::Shortest;
+    games = catalog.filtered(filter);
+    assert(games.front()->id == "astral-trails-demo");
+
+    filter.sort = vitrine::SortMode::Score;
+    filter.acclaimedOnly = true;
+    games = catalog.filtered(filter);
+    assert(games.size() == 8);
+    for (const auto* g : games) {
+        assert(g->score >= 80.0f);
+    }
+
+    filter.acclaimedOnly = false;
+    filter.upcomingOnly = true;
+    games = catalog.filtered(filter);
+    assert(games.size() == 3);
+    for (const auto* g : games) {
+        assert(g->releaseYear > 2025);
+    }
+
+    filter.upcomingOnly = false;
+    filter.sort = vitrine::SortMode::Release;
+    games = catalog.filtered(filter);
+    assert(games.front()->releaseYear == 2026);
+
+    filter.preserveSourceOrder = true;
+    games = catalog.filtered(filter);
+    assert(games.front()->id == catalog.all().front().id);
+
+    assert(std::string(vitrine::sortModeLabel(vitrine::SortMode::Popular)) == "Mais populares");
+    assert(std::string(vitrine::sortModeLabel(vitrine::SortMode::Release)) == "Lancamento");
+    assert(std::string(vitrine::backlogStatusLabel(vitrine::BacklogStatus::WantToPlay)) == "Quero jogar");
+    assert(std::string(vitrine::backlogStatusLabel(vitrine::BacklogStatus::Completed)) == "Finalizado");
+
+    assert(vitrine::normalizeForSearch("Ação e Simulação") == "acao e simulacao");
+    std::cout << "catalog_tests: OK\n";
+    return 0;
+}
