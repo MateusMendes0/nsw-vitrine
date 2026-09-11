@@ -19,8 +19,7 @@ Thumbs.db
 runtime/
 
 # Segredos e Configurações locais
-include/dev_secrets.hpp
-include/dev_secrets.hpp.example
+/include/core/dev_secrets.hpp
 *.env
 *.env.*
 
@@ -29,4 +28,3 @@ README.dev.md
 
 # Worker
 worker/
-

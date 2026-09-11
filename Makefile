@@ -10,9 +10,9 @@ include $(DEVKITPRO)/libnx/switch_rules
 
 TARGET       := switch-vitrine
 BUILD        := build
-SOURCES      := source
+SOURCES      := source source/core source/ui
 DATA         := data
-INCLUDES     := include
+INCLUDES     := include include/core include/ui
 
 APP_TITLE    := Vitrine
 APP_AUTHOR   := Mateus Mendes

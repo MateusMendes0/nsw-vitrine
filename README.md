@@ -24,7 +24,8 @@
 
 ## ✨ Funcionalidades
 
-- **Design Elegante e Foco na Arte**: Grade com 5 capas verticais em destaque, transições dinâmicas de foco (escala, elevação, brilho) e animações suaves de entrada.
+- **Design Elegante e Foco na Arte**: Grade com 5 capas verticais, foco ciano em camadas, animações suaves e um painel contextual com imagem, sinopse, nota e ações do jogo selecionado.
+- **Controles de Leitura Rápida**: Atalhos do rodapé e do painel contextual usam teclas visuais inspiradas nos controles do Nintendo Switch.
 - **Visualização Alternativa (Modo Clássico)**: Alterne a qualquer momento para a visualização em lista/cards detalhados pressionando o analógico direito (`R3`).
 - **Descoberta Inteligente**: Navegue por seções organizadas na aba inicial:
   - *Todos*: Catálogo completo filtrável.
@@ -104,16 +105,28 @@ cmake --build build-tests
 ctest --test-dir build-tests --output-on-failure
 ```
 
+Para também compilar todos os módulos extraídos pela refatoração, instale SDL2,
+SDL2_image, SDL2_ttf, libcurl e jansson com metadados para `pkg-config` e execute:
+
+```bash
+cmake -S . -B build-desktop -DVITRINE_BUILD_DESKTOP_APP=ON
+cmake --build build-desktop
+ctest --test-dir build-desktop --output-on-failure
+```
+
 ---
 
 ## 📁 Estrutura do Repositório
 
 ```text
-├── include/              # Cabeçalhos C++ (modelos de dados, catálogo, cliente de API)
-├── source/               # Implementações C++ e interface SDL2
+├── include/core/         # Estado da aplicação, modelos, catálogo e API
+├── include/ui/           # Interfaces dos componentes visuais SDL2
+├── source/core/          # Regras da aplicação e integrações
+├── source/ui/            # Renderização dos componentes visuais
+├── source/main.cpp       # Inicialização e loop principal
 ├── romfs/                # Recursos embarcados na compilação do NRO (ícones, logos)
 ├── tests/                # Testes unitários para execução no desktop (CMake)
-├── CMakeLists.txt        # Configuração de compilação dos testes de desktop
+├── CMakeLists.txt        # Testes portáteis e validação opcional do app desktop
 ├── Makefile              # Regras de build para Nintendo Switch (devkitPro/libnx)
 └── README.md             # Este documento público
 ```
