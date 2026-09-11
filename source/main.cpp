@@ -73,6 +73,20 @@ void gradientRect(SDL_Renderer* renderer, int x, int y, int w, int h,
     }
 }
 
+void horizontalGradientRect(SDL_Renderer* renderer, int x, int y, int w, int h,
+                            SDL_Color left, SDL_Color right) {
+    for (int column = 0; column < w; ++column) {
+        const float t = w <= 1 ? 0.0f : static_cast<float>(column) / static_cast<float>(w - 1);
+        SDL_Color line{
+            static_cast<Uint8>(left.r + (right.r - left.r) * t),
+            static_cast<Uint8>(left.g + (right.g - left.g) * t),
+            static_cast<Uint8>(left.b + (right.b - left.b) * t),
+            static_cast<Uint8>(left.a + (right.a - left.a) * t)};
+        setColor(renderer, line);
+        SDL_RenderDrawLine(renderer, x + column, y, x + column, y + h - 1);
+    }
+}
+
 class TextRenderer {
 public:
     bool initialize() {
@@ -117,11 +131,18 @@ public:
     void clear() {
         for (auto& item : cache_) SDL_DestroyTexture(item.second.texture);
         cache_.clear();
+        widthCache_.clear();
+        ellipsisCache_.clear();
+        wrappedCache_.clear();
     }
 
     int width(const std::string& text, int size) const {
+        const std::string key = std::to_string(size) + ":" + text;
+        const auto cached = widthCache_.find(key);
+        if (cached != widthCache_.end()) return cached->second;
         int w = 0;
         TTF_SizeUTF8(font(size), text.c_str(), &w, nullptr);
+        widthCache_.emplace(key, w);
         return w;
     }
 
@@ -138,7 +159,18 @@ public:
     void draw(SDL_Renderer* renderer, const std::string& text, int x, int y, int size,
               SDL_Color value, int maxWidth = 0) {
         if (text.empty()) return;
-        const std::string visible = maxWidth > 0 ? ellipsize(text, size, maxWidth) : text;
+        std::string visible = text;
+        if (maxWidth > 0) {
+            const std::string ellipsisKey = std::to_string(size) + ":" +
+                std::to_string(maxWidth) + ":" + text;
+            const auto cached = ellipsisCache_.find(ellipsisKey);
+            if (cached != ellipsisCache_.end()) {
+                visible = cached->second;
+            } else {
+                visible = ellipsize(text, size, maxWidth);
+                ellipsisCache_.emplace(ellipsisKey, visible);
+            }
+        }
         const std::string key = std::to_string(size) + ":" + std::to_string(value.r) + ":" +
                                 std::to_string(value.g) + ":" + std::to_string(value.b) + ":" + visible;
         auto found = cache_.find(key);
@@ -159,26 +191,34 @@ public:
 
     int drawWrapped(SDL_Renderer* renderer, const std::string& text, int x, int y, int size,
                     SDL_Color value, int maxWidth, int maxLines) {
-        std::istringstream words(text);
-        std::string line;
-        std::string word;
-        std::vector<std::string> lines;
-        while (words >> word) {
-            const std::string candidate = line.empty() ? word : line + " " + word;
-            if (!line.empty() && width(candidate, size) > maxWidth) {
-                lines.push_back(line);
-                line = word;
-                if (static_cast<int>(lines.size()) == maxLines) break;
-            } else {
-                line = candidate;
+        const std::string wrapKey = std::to_string(size) + ":" + std::to_string(maxWidth) + ":" +
+            std::to_string(maxLines) + ":" + text;
+        auto cached = wrappedCache_.find(wrapKey);
+        if (cached == wrappedCache_.end()) {
+            std::istringstream words(text);
+            std::string line;
+            std::string word;
+            std::vector<std::string> lines;
+            while (words >> word) {
+                const std::string candidate = line.empty() ? word : line + " " + word;
+                if (!line.empty() && width(candidate, size) > maxWidth) {
+                    lines.push_back(line);
+                    line = word;
+                    if (static_cast<int>(lines.size()) == maxLines) break;
+                } else {
+                    line = candidate;
+                }
             }
+            if (static_cast<int>(lines.size()) < maxLines && !line.empty()) lines.push_back(line);
+            if (!lines.empty() && !words.eof()) {
+                lines.back() = ellipsize(lines.back() + "...", size, maxWidth);
+            }
+            cached = wrappedCache_.emplace(wrapKey, std::move(lines)).first;
         }
-        if (static_cast<int>(lines.size()) < maxLines && !line.empty()) lines.push_back(line);
         const int lineHeight = size + 8;
+        const std::vector<std::string>& lines = cached->second;
         for (std::size_t i = 0; i < lines.size(); ++i) {
-            std::string visible = lines[i];
-            if (i + 1 == lines.size() && !words.eof()) visible = ellipsize(visible + "...", size, maxWidth);
-            draw(renderer, visible, x, y + static_cast<int>(i) * lineHeight, size, value);
+            draw(renderer, lines[i], x, y + static_cast<int>(i) * lineHeight, size, value);
         }
         return static_cast<int>(lines.size()) * lineHeight;
     }
@@ -208,6 +248,9 @@ private:
     TTF_Font* fontHeading_ = nullptr;
     TTF_Font* fontHero_ = nullptr;
     bool initialized_ = false;
+    mutable std::unordered_map<std::string, int> widthCache_;
+    std::unordered_map<std::string, std::string> ellipsisCache_;
+    std::unordered_map<std::string, std::vector<std::string>> wrappedCache_;
     std::unordered_map<std::string, Entry> cache_;
 };
 
@@ -306,6 +349,29 @@ struct Input {
 struct CoverRequest {
     vitrine::Game game;
     bool portrait = true;
+};
+
+struct SimilarReturnPoint {
+    std::vector<vitrine::Game> catalogGames;
+    vitrine::CatalogFilter filter{};
+    vitrine::Game detailGame{};
+    std::vector<std::string> detailScreenshots;
+    std::string detailGameId;
+    int genreIndex = 0;
+    int highlightIndex = 0;
+    int backlogFilterIndex = 0;
+    int discoveryIndex = 0;
+    int discoveryCursor = 0;
+    int selected = 0;
+    int previousSelected = -1;
+    int currentPage = 1;
+    int screenshotIndex = 0;
+    bool discoveryFocus = false;
+    bool favoritesTab = false;
+    bool backlogTab = false;
+    bool classicView = false;
+    bool usingApi = false;
+    bool hasMore = false;
 };
 
 class App {
@@ -423,6 +489,14 @@ public:
             return;
         }
         if (input.back) {
+            if (!similarReturnStack_.empty()) {
+                restoreSimilarSourceDetails();
+                return;
+            }
+            if (!filter_.query.empty()) {
+                clearSearchAndReturn();
+                return;
+            }
             if (!backlogTab_ && !favoritesTab_ && discoveryIndex_ != 0) {
                 applyDiscoverySection(0);
                 return;
@@ -454,7 +528,7 @@ public:
             return;
         }
         const int columns = gridColumns();
-        if (input.up && !favoritesTab_ && !backlogTab_ &&
+        if (input.up && similarReturnStack_.empty() && !favoritesTab_ && !backlogTab_ &&
             (games_.empty() || selected_ < columns)) {
             discoveryFocus_ = true;
             discoveryCursor_ = discoveryIndex_;
@@ -834,6 +908,9 @@ private:
         const int firstIndex = firstRow * columns;
         std::vector<vitrine::Game> visible;
         std::string signature = classicView_ ? "classic;" : "covers;";
+        if (!classicView_ && selected_ >= 0 && selected_ < static_cast<int>(games_.size())) {
+            signature += "selected:" + games_[selected_]->id + ";";
+        }
         visible.reserve(visibleCount);
         for (int slot = 0; slot < visibleCount; ++slot) {
             const int index = firstIndex + slot;
@@ -861,6 +938,17 @@ private:
                     requestId != inFlightCoverId_) {
                     coverQueue_.push_back({selectedGame, portrait});
                     queuedCoverIds_.insert(requestId);
+                }
+                // A vitrine vertical usa a arte horizontal do item selecionado no
+                // painel de resumo, entao ela tambem entra na fila com prioridade.
+                if (portrait && !selectedGame.imageUrl.empty()) {
+                    const std::string backdropId = "backdrop:" + selectedGame.id;
+                    if (processedCoverIds_.find(backdropId) == processedCoverIds_.end() &&
+                        queuedCoverIds_.find(backdropId) == queuedCoverIds_.end() &&
+                        backdropId != inFlightCoverId_) {
+                        coverQueue_.push_back({selectedGame, false});
+                        queuedCoverIds_.insert(backdropId);
+                    }
                 }
             }
             for (const vitrine::Game& game : visible) {
@@ -1194,6 +1282,61 @@ private:
         loadCurrentFiltersFirstPage();
     }
 
+    void restoreSimilarSourceDetails() {
+        if (similarReturnStack_.empty()) return;
+        SimilarReturnPoint returnPoint = std::move(similarReturnStack_.back());
+        similarReturnStack_.pop_back();
+
+        // Aproveita detalhes que tenham terminado de carregar enquanto a lista
+        // de semelhantes estava aberta.
+        if (detailGameId_ == returnPoint.detailGameId && detailGame_.id == returnPoint.detailGame.id) {
+            returnPoint.detailGame = detailGame_;
+            if (!detailScreenshots_.empty()) {
+                returnPoint.detailScreenshots = detailScreenshots_;
+                returnPoint.screenshotIndex = screenshotIndex_;
+            }
+        }
+        for (vitrine::Game& item : returnPoint.catalogGames) {
+            if (item.id == returnPoint.detailGame.id) {
+                item = returnPoint.detailGame;
+                break;
+            }
+        }
+
+        catalog_.replace(std::move(returnPoint.catalogGames));
+        filter_ = returnPoint.filter;
+        genreIndex_ = returnPoint.genreIndex;
+        highlightIndex_ = returnPoint.highlightIndex;
+        backlogFilterIndex_ = returnPoint.backlogFilterIndex;
+        discoveryIndex_ = returnPoint.discoveryIndex;
+        discoveryCursor_ = returnPoint.discoveryCursor;
+        discoveryFocus_ = returnPoint.discoveryFocus;
+        favoritesTab_ = returnPoint.favoritesTab;
+        backlogTab_ = returnPoint.backlogTab;
+        classicView_ = returnPoint.classicView;
+        usingApi_ = returnPoint.usingApi;
+        hasMore_ = returnPoint.hasMore;
+        currentPage_ = returnPoint.currentPage;
+        selected_ = returnPoint.selected;
+        previousSelected_ = returnPoint.previousSelected;
+        detailGame_ = std::move(returnPoint.detailGame);
+        detailGameId_ = std::move(returnPoint.detailGameId);
+        detailScreenshots_ = std::move(returnPoint.detailScreenshots);
+        screenshotIndex_ = detailScreenshots_.empty()
+            ? 0
+            : std::max(0, std::min(returnPoint.screenshotIndex,
+                                   static_cast<int>(detailScreenshots_.size()) - 1));
+        screenshotFullscreen_ = false;
+        detailClosing_ = false;
+        details_ = true;
+        detailTransitionStart_ = SDL_GetTicks();
+        refresh();
+        visibleCoverSignature_.clear();
+        queueVisibleCovers();
+        if (detailScreenshots_.empty()) startScreenshotLoad(detailGame_);
+        status_ = "Voltando para " + detailGame_.title;
+    }
+
     void loadSimilarGames(const vitrine::Game& game) {
         if (game.id.rfind("igdb-", 0) != 0) return;
         std::vector<vitrine::Game> similar;
@@ -1203,19 +1346,48 @@ private:
             status_ = error.empty() ? "Nenhum jogo semelhante encontrado" : error;
             return;
         }
+
+        SimilarReturnPoint returnPoint;
+        returnPoint.catalogGames = catalog_.all();
+        returnPoint.filter = filter_;
+        returnPoint.detailGame = detailGame_;
+        returnPoint.detailScreenshots = detailScreenshots_;
+        returnPoint.detailGameId = detailGameId_;
+        returnPoint.genreIndex = genreIndex_;
+        returnPoint.highlightIndex = highlightIndex_;
+        returnPoint.backlogFilterIndex = backlogFilterIndex_;
+        returnPoint.discoveryIndex = discoveryIndex_;
+        returnPoint.discoveryCursor = discoveryCursor_;
+        returnPoint.selected = selected_;
+        returnPoint.previousSelected = previousSelected_;
+        returnPoint.currentPage = currentPage_;
+        returnPoint.screenshotIndex = screenshotIndex_;
+        returnPoint.discoveryFocus = discoveryFocus_;
+        returnPoint.favoritesTab = favoritesTab_;
+        returnPoint.backlogTab = backlogTab_;
+        returnPoint.classicView = classicView_;
+        returnPoint.usingApi = usingApi_;
+        returnPoint.hasMore = hasMore_;
+        similarReturnStack_.push_back(std::move(returnPoint));
+
         catalog_.replace(std::move(similar));
         usingApi_ = true;
         details_ = false;
+        detailClosing_ = false;
         selected_ = 0;
+        previousSelected_ = -1;
         currentPage_ = 1;
         hasMore_ = false;
         favoritesTab_ = false;
         backlogTab_ = false;
         discoveryIndex_ = 0;
         discoveryCursor_ = 0;
-        filter_.preserveSourceOrder = false;
-        hasDiscoveryReturnPoint_ = false;
-        discoveryReturnGames_.clear();
+        discoveryFocus_ = false;
+        genreIndex_ = 0;
+        highlightIndex_ = 0;
+        backlogFilterIndex_ = 0;
+        filter_ = vitrine::CatalogFilter{};
+        filter_.preserveSourceOrder = true;
         status_ = "Semelhantes a " + game.title;
         refresh();
         visibleCoverSignature_.clear();
@@ -1273,6 +1445,22 @@ private:
                             std::to_string(result.games.size()) +
                             (result.hasMore ? "+ jogos" : " jogos");
         refresh();
+    }
+
+    void clearSearchAndReturn() {
+        filter_.query.clear();
+        selected_ = 0;
+        previousSelected_ = -1;
+        if (favoritesTab_ || backlogTab_) {
+            refresh();
+            status_ = backlogTab_ ? "Minha lista" : "Aba Favoritos";
+        } else {
+            loadCurrentFiltersFirstPage();
+            if (!usingApi_) status_ = "Catalogo completo";
+        }
+        startGridReveal();
+        visibleCoverSignature_.clear();
+        queueVisibleCovers();
     }
 
     void startScreenshotLoad(const vitrine::Game& game) {
@@ -1677,6 +1865,14 @@ private:
 
     void renderDiscoveryRibbon(SDL_Renderer* renderer, TextRenderer& text) {
         if (backlogTab_ || favoritesTab_) return;
+        if (!similarReturnStack_.empty()) {
+            text.draw(renderer, "SEMELHANTES", 42, 158, 18, color(112, 225, 255));
+            text.draw(renderer, similarReturnStack_.back().detailGame.title,
+                      174, 157, 18, color(205, 214, 232), 700);
+            text.draw(renderer, "B  Voltar aos detalhes", 1033, 157, 18,
+                      color(151, 167, 255), 205);
+            return;
+        }
         text.draw(renderer, "DESCOBRIR", 42, 158, 18, color(112, 126, 157));
         static const int widths[] = {76, 112, 132, 158, 82, 164};
         int x = 150;
@@ -1742,7 +1938,7 @@ private:
             ++renderedGames;
         }
         if (!classicView_) {
-            drawSelectedSummary(renderer, text, *games_[selected_], gridRevealProgress(renderedGames));
+            drawSelectedSummary(renderer, text, images, *games_[selected_], gridRevealProgress(renderedGames));
         }
     }
 
@@ -1781,18 +1977,22 @@ private:
                        const vitrine::Game& game, int x, int y, float focus, float reveal) {
         if (reveal <= 0.01f) return;
         y += static_cast<int>(std::round(28.0f * (1.0f - reveal)));
-        const int cardX = x - static_cast<int>(std::round(4.0f * focus));
-        const int cardY = y - static_cast<int>(std::round(6.0f * focus));
-        const int cardWidth = 220 + static_cast<int>(std::round(8.0f * focus));
-        const int cardHeight = 364 + static_cast<int>(std::round(12.0f * focus));
+        const int cardX = x - static_cast<int>(std::round(3.0f * focus));
+        const int cardY = y - static_cast<int>(std::round(4.0f * focus));
+        const int cardWidth = 220 + static_cast<int>(std::round(6.0f * focus));
+        const int cardHeight = 308 + static_cast<int>(std::round(8.0f * focus));
         const int coverX = cardX + 8;
         const int coverY = cardY + 8;
         const int coverWidth = cardWidth - 16;
-        const int coverHeight = 288 + static_cast<int>(std::round(10.0f * focus));
+        const int coverHeight = 236 + static_cast<int>(std::round(6.0f * focus));
 
         if (focus > 0.01f) {
-            fillRoundedRect(renderer, cardX - 5, cardY - 5, cardWidth + 10, cardHeight + 10,
-                            18, color(112, 130, 255, static_cast<Uint8>(255.0f * focus)));
+            fillRoundedRect(renderer, cardX - 10, cardY - 10, cardWidth + 20, cardHeight + 20,
+                            21, color(24, 139, 245, static_cast<Uint8>(42.0f * focus)));
+            fillRoundedRect(renderer, cardX - 7, cardY - 7, cardWidth + 14, cardHeight + 14,
+                            19, color(36, 184, 255, static_cast<Uint8>(92.0f * focus)));
+            fillRoundedRect(renderer, cardX - 4, cardY - 4, cardWidth + 8, cardHeight + 8,
+                            17, color(112, 225, 255, static_cast<Uint8>(255.0f * focus)));
         }
         fillRoundedRect(renderer, cardX, cardY, cardWidth, cardHeight, 13,
                         color(static_cast<Uint8>(20 + 5 * focus),
@@ -1830,21 +2030,52 @@ private:
         text.draw(renderer, score, cardX + cardWidth - 19 - scoreWidth, titleY + 31, 18,
                   game.score > 0.0f ? color(116, 235, 181) : color(128, 140, 166));
         if (reveal < 0.999f) {
-            fillRoundedRect(renderer, cardX - 5, cardY - 5, cardWidth + 10, cardHeight + 10,
-                            18, color(7, 10, 18, static_cast<Uint8>(245.0f * (1.0f - reveal))));
+            fillRoundedRect(renderer, cardX - 10, cardY - 10, cardWidth + 20, cardHeight + 20,
+                            21, color(7, 10, 18, static_cast<Uint8>(245.0f * (1.0f - reveal))));
         }
     }
 
-    void drawSelectedSummary(SDL_Renderer* renderer, TextRenderer& text, const vitrine::Game& game,
-                             float reveal) {
+    void drawKeyHint(SDL_Renderer* renderer, TextRenderer& text, int x, int y,
+                     const std::string& key, const std::string& label, bool accent = false) {
+        const int keyWidth = std::max(28, text.width(key, 18) + 12);
+        fillRoundedRect(renderer, x, y, keyWidth, 28, 14,
+                        accent ? color(117, 226, 255) : color(229, 235, 247));
+        const int keyTextWidth = text.width(key, 18);
+        text.draw(renderer, key, x + (keyWidth - keyTextWidth) / 2, y + 4, 18,
+                  accent ? color(7, 45, 78) : color(20, 29, 49));
+        text.draw(renderer, label, x + keyWidth + 9, y + 4, 18,
+                  accent ? color(222, 246, 255) : color(204, 213, 231));
+    }
+
+    void drawDetailAction(SDL_Renderer* renderer, TextRenderer& text, int x, int y, int width,
+                          const std::string& key, const std::string& label,
+                          bool primary, bool active) {
+        if (primary) {
+            fillRoundedRect(renderer, x - 4, y - 4, width + 8, 56, 14, color(28, 158, 255, 72));
+            fillRoundedRect(renderer, x - 2, y - 2, width + 4, 52, 13, color(112, 225, 255));
+        } else {
+            fillRoundedRect(renderer, x - 1, y - 1, width + 2, 50, 12,
+                            active ? color(143, 104, 194, 230) : color(58, 79, 113, 225));
+        }
+        fillRoundedRect(renderer, x, y, width, 48, 11,
+                        primary ? color(22, 100, 174, 242) :
+                        (active ? color(64, 44, 91, 242) : color(15, 25, 42, 236)));
+        drawKeyHint(renderer, text, x + 13, y + 10, key, label, primary);
+    }
+
+    void drawSelectedSummary(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer& images,
+                             const vitrine::Game& game, float reveal) {
         if (reveal <= 0.01f) return;
-        const int baseSummaryY = (!backlogTab_ && !favoritesTab_) ? 572 : 544;
-        const int summaryY = baseSummaryY + static_cast<int>(std::round(14.0f * (1.0f - reveal)));
-        const int summaryHeight = (!backlogTab_ && !favoritesTab_) ? 66 : 94;
-        const int firstLineY = summaryY + 9;
-        const int secondLineY = summaryY + 38;
+        const int summaryY = 516 + static_cast<int>(std::round(12.0f * (1.0f - reveal)));
+        constexpr int summaryHeight = 122;
         fillRoundedRect(renderer, 42, summaryY, 1196, summaryHeight, 15, color(17, 23, 38));
-        fillRoundedRect(renderer, 42, summaryY, 5, summaryHeight, 3, color(112, 130, 255));
+        fillRoundedRect(renderer, 42, summaryY, 5, summaryHeight, 3, color(112, 225, 255));
+
+        gradientRect(renderer, 54, summaryY + 10, 176, 102, game.coverTop, game.coverBottom);
+        if (images.drawCover(renderer, game.localImagePath, 54, summaryY + 10, 176, 102)) {
+            fillRect(renderer, 54, summaryY + 10, 176, 102, color(5, 10, 20, 42));
+        }
+        fillRoundedRect(renderer, 241, summaryY + 12, 2, summaryHeight - 24, 1, color(47, 61, 85));
 
         std::string genres;
         for (std::size_t index = 0; index < game.genres.size() && index < 2; ++index) {
@@ -1852,24 +2083,31 @@ private:
             genres += game.genres[index];
         }
         if (genres.empty()) genres = "Genero nao informado";
-        text.draw(renderer, genres, 66, firstLineY, 18, color(151, 167, 255), 330);
-
         const std::string playtime = game.mainHours > 0.0f
             ? (game.averagePlaytime ? "Tempo medio  " : "Historia  ") + hoursText(game.mainHours)
             : "Tempo medio  --";
-        text.draw(renderer, playtime, 430, firstLineY, 18, color(184, 193, 213), 250);
-        text.draw(renderer, game.studio.empty() ? "Desenvolvedora nao informada" : game.studio,
-                  714, firstLineY, 18, color(184, 193, 213), 330);
-        text.draw(renderer, "A  Ver detalhes", 1059, firstLineY, 18, color(230, 234, 246), 155);
+        const std::string year = game.releaseYear > 0 ? std::to_string(game.releaseYear) : "Data indefinida";
+        const std::string metadata = genres + "  •  " + year + "  •  " + playtime;
+        text.draw(renderer, game.title, 258, summaryY + 5, 28, color(245, 248, 253), 790);
+        text.draw(renderer, metadata, 258, summaryY + 39, 18, color(151, 184, 224), 790);
+        const std::string description = game.description.empty() ? game.tagline : game.description;
+        text.draw(renderer, description, 258, summaryY + 65, 18, color(179, 190, 211), 790);
 
         const vitrine::BacklogStatus libraryStatus = backlogStatus(game.id);
         const std::string libraryAction = libraryStatus == vitrine::BacklogStatus::None
-            ? "ZR  + Lista"
-            : "ZR  " + std::string(vitrine::backlogStatusLabel(libraryStatus));
-        text.draw(renderer, game.tagline, 66, secondLineY, 18, color(126, 138, 164), 820);
-        text.draw(renderer, libraryAction, 900, secondLineY, 18, color(151, 167, 255), 155);
-        text.draw(renderer, isFavorite(game.id) ? "L3  Remover" : "L3  + Favoritar",
-                  1068, secondLineY, 18, color(232, 220, 255), 150);
+            ? "Minha lista"
+            : vitrine::backlogStatusLabel(libraryStatus);
+        drawKeyHint(renderer, text, 258, summaryY + 91, "A", "Detalhes", true);
+        drawKeyHint(renderer, text, 386, summaryY + 91, "ZR", libraryAction);
+        drawKeyHint(renderer, text, 554, summaryY + 91, "L3",
+                    isFavorite(game.id) ? "Remover favorito" : "Favoritar");
+
+        fillRoundedRect(renderer, 1080, summaryY + 13, 2, summaryHeight - 26, 1, color(47, 61, 85));
+        text.draw(renderer, "NOTA", 1121, summaryY + 25, 18, color(126, 145, 176));
+        const std::string score = game.score > 0.0f ? scoreText(game.score) : "--";
+        const int scoreWidth = text.width(score, 28);
+        text.draw(renderer, score, 1158 - scoreWidth / 2, summaryY + 54, 28,
+                  game.score > 0.0f ? color(116, 235, 181) : color(150, 162, 186));
         if (reveal < 0.999f) {
             fillRoundedRect(renderer, 42, summaryY, 1196, summaryHeight, 15,
                             color(7, 10, 18, static_cast<Uint8>(235.0f * (1.0f - reveal))));
@@ -1925,29 +2163,55 @@ private:
 
     void renderFooter(SDL_Renderer* renderer, TextRenderer& text) {
         fillRect(renderer, 0, 652, kWidth, 68, color(9, 13, 23, 245));
-        if (discoveryFocus_) {
-            text.draw(renderer, "Esquerda / Direita  Secao", 42, 674, 18, color(151, 167, 255));
-            text.draw(renderer, "A  Abrir", 300, 674, 18, color(224, 230, 246));
-            text.draw(renderer, "Baixo  Voltar aos jogos", 410, 674, 18, color(204, 211, 226));
-            text.draw(renderer, discoveryIndex_ == 0 ? "B  Cancelar" : "B  Todos", 675, 674, 18,
-                      color(204, 211, 226));
-            text.draw(renderer, "-  Sobre", 800, 674, 18, color(151, 167, 255));
-            text.draw(renderer, status_, 900, 674, 18, color(122, 137, 170), 205);
-            text.draw(renderer, "+  Sair", 1138, 674, 18, color(139, 150, 173));
+        fillRect(renderer, 0, 652, kWidth, 1, color(38, 111, 190, 190));
+        if (!similarReturnStack_.empty()) {
+            drawKeyHint(renderer, text, 42, 670, "B", "Jogo anterior");
+            drawKeyHint(renderer, text, 208, 670, "A", "Detalhes", true);
+            drawKeyHint(renderer, text, 332, 670, "L/R", "Abas");
+            drawKeyHint(renderer, text, 436, 670, "R3", "Vista");
+            drawKeyHint(renderer, text, 544, 670, "ZR", "Minha lista");
+            drawKeyHint(renderer, text, 708, 670, "L3", "Favoritar");
+            text.draw(renderer, status_, 862, 674, 18, color(122, 137, 170), 376);
             return;
         }
-        text.draw(renderer, "A  Detalhes", 42, 674, 18, color(204, 211, 226));
-        text.draw(renderer, "L/R  Abas", 166, 674, 18, color(151, 167, 255));
-        text.draw(renderer, "X  Filtros", 270, 674, 18, color(204, 211, 226));
-        if (backlogTab_ || favoritesTab_) {
-            text.draw(renderer, "B  Explorar", 376, 674, 18, color(204, 211, 226));
+        if (!filter_.query.empty()) {
+            drawKeyHint(renderer, text, 42, 670, "B", "Limpar busca");
+            drawKeyHint(renderer, text, 196, 670, "A", "Detalhes", true);
+            drawKeyHint(renderer, text, 320, 670, "Y", "Nova busca");
+            drawKeyHint(renderer, text, 458, 670, "X", "Filtros");
+            drawKeyHint(renderer, text, 576, 670, "R3", "Vista");
+            text.draw(renderer, "Busca: " + filter_.query, 704, 674, 18,
+                      color(151, 181, 224), 534);
+            return;
         }
-        text.draw(renderer, "Y  Buscar", 488, 674, 18, color(204, 211, 226));
-        text.draw(renderer, "ZL  Surpresa", 586, 674, 18, color(151, 167, 255));
-        text.draw(renderer, "R3  Vista", 724, 674, 18, color(151, 167, 255));
-        text.draw(renderer, "-  Sobre", 818, 674, 18, color(151, 167, 255));
-        text.draw(renderer, status_, 912, 674, 18, color(122, 137, 170), 194);
-        text.draw(renderer, "+  Sair", 1138, 674, 18, color(139, 150, 173));
+        if (discoveryFocus_) {
+            text.draw(renderer, "← / →  Secao     ↓  Jogos", 42, 674, 18, color(151, 167, 255));
+            drawKeyHint(renderer, text, 286, 670, "A", "Abrir", true);
+            drawKeyHint(renderer, text, 390, 670, "B", discoveryIndex_ == 0 ? "Cancelar" : "Todos");
+            drawKeyHint(renderer, text, 524, 670, "-", "Sobre");
+            text.draw(renderer, status_, 640, 674, 18, color(122, 137, 170), 455);
+            drawKeyHint(renderer, text, 1138, 670, "+", "Sair");
+            return;
+        }
+        drawKeyHint(renderer, text, 42, 670, "A", "Detalhes", true);
+        if (backlogTab_ || favoritesTab_) {
+            drawKeyHint(renderer, text, 166, 670, "B", "Explorar");
+            drawKeyHint(renderer, text, 286, 670, "L/R", "Abas");
+            drawKeyHint(renderer, text, 390, 670, "X", "Filtros");
+            drawKeyHint(renderer, text, 508, 670, "Y", "Buscar");
+            drawKeyHint(renderer, text, 616, 670, "R3", "Vista");
+            drawKeyHint(renderer, text, 724, 670, "-", "Sobre");
+            text.draw(renderer, status_, 830, 674, 18, color(122, 137, 170), 265);
+        } else {
+            drawKeyHint(renderer, text, 166, 670, "L/R", "Abas");
+            drawKeyHint(renderer, text, 270, 670, "X", "Filtros");
+            drawKeyHint(renderer, text, 388, 670, "Y", "Buscar");
+            drawKeyHint(renderer, text, 496, 670, "ZL", "Surpresa");
+            drawKeyHint(renderer, text, 634, 670, "R3", "Vista");
+            drawKeyHint(renderer, text, 742, 670, "-", "Sobre");
+            text.draw(renderer, status_, 848, 674, 18, color(122, 137, 170), 247);
+        }
+        drawKeyHint(renderer, text, 1138, 670, "+", "Sair");
     }
 
     void renderDetailsWithTransition(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer& images,
@@ -2039,119 +2303,127 @@ private:
 
     void renderDetails(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer& images,
                        const vitrine::Game& game) {
-        fillRect(renderer, 0, 0, kWidth, kHeight, color(7, 10, 18, 250));
-        gradientRect(renderer, 0, 0, 404, kHeight, game.coverTop, game.coverBottom);
-        const std::string heroImage = detailScreenshots_.empty() ? game.localCoverImagePath :
-                                      detailScreenshots_[screenshotIndex_];
-        images.drawCover(renderer, heroImage, 0, 0, 404, kHeight);
-        fillRect(renderer, 0, 0, 404, kHeight, color(4, 8, 17, 72));
-        fillRect(renderer, 0, 398, 404, 322, color(4, 8, 17, 214));
+        gradientRect(renderer, 0, 0, kWidth, kHeight, game.coverTop, game.coverBottom);
+        bool hasHero = false;
+        if (!detailScreenshots_.empty()) {
+            hasHero = images.drawCover(renderer, detailScreenshots_[screenshotIndex_], 0, 0, kWidth, kHeight);
+        }
+        if (!hasHero) hasHero = images.drawCover(renderer, game.localImagePath, 0, 0, kWidth, kHeight);
+        if (!hasHero) images.drawCover(renderer, game.localCoverImagePath, 0, 0, kWidth, kHeight);
+
+        fillRect(renderer, 0, 0, kWidth, kHeight, color(3, 7, 16, 62));
+        horizontalGradientRect(renderer, 0, 0, 920, 652,
+                               color(3, 8, 18, 248), color(3, 8, 18, 8));
+        fillRect(renderer, 0, 402, kWidth, 250, color(3, 8, 18, 145));
 
         std::string genres;
-        for (std::size_t i = 0; i < game.genres.size(); ++i) {
+        for (std::size_t i = 0; i < game.genres.size() && i < 3; ++i) {
             if (i) genres += "  •  ";
             genres += game.genres[i];
         }
-        std::string credits = game.studio;
-        if (!game.publisher.empty()) credits += "  •  " + game.publisher;
-        std::string release = !game.releaseDate.empty() ? game.releaseDate :
-                              (game.releaseYear > 0 ? std::to_string(game.releaseYear) : "Data indefinida");
-        if (!game.ageRating.empty()) release += "  •  " + game.ageRating;
-        std::string discoveryFacts;
-        if (!game.franchise.empty()) discoveryFacts = "Franquia: " + game.franchise;
-        if (!game.gameModes.empty()) {
-            if (!discoveryFacts.empty()) discoveryFacts += "  •  ";
-            discoveryFacts += game.gameModes.front();
-        }
+        if (genres.empty()) genres = "Genero nao informado";
+
+        const std::string release = !game.releaseDate.empty() ? game.releaseDate :
+            (game.releaseYear > 0 ? std::to_string(game.releaseYear) : "Data indefinida");
+        std::string metadata = release;
+        if (!game.studio.empty()) metadata += "  •  " + game.studio;
+        metadata += "  •  " + genres;
+
+        std::string facts;
+        if (!game.gameModes.empty()) facts = game.gameModes.front();
         if (!game.perspectives.empty()) {
-            if (!discoveryFacts.empty()) discoveryFacts += "  •  ";
-            discoveryFacts += game.perspectives.front();
+            if (!facts.empty()) facts += "  •  ";
+            facts += game.perspectives.front();
         }
-        if (!game.themes.empty()) {
-            if (!discoveryFacts.empty()) discoveryFacts += "  •  ";
-            discoveryFacts += "Tema: " + game.themes.front();
+        if (!game.ageRating.empty()) {
+            if (!facts.empty()) facts += "  •  ";
+            facts += game.ageRating;
         }
 
-        fillRoundedRect(renderer, 32, 32, 90, 34, 10, color(7, 12, 24, 205));
-        text.draw(renderer, vitrine::gameTypeLabel(game.type), 52, 39, 18, color(239, 242, 250));
-        const bool favorite = isFavorite(game.id);
-        fillRoundedRect(renderer, 132, 32, favorite ? 116 : 128, 34, 10,
-                        favorite ? color(87, 65, 145, 220) : color(20, 27, 43, 220));
-        text.draw(renderer, favorite ? "♥  Favorito" : "+  Favoritar", 143, 39, 18,
-                  favorite ? color(242, 222, 255) : color(224, 230, 246));
-        const vitrine::BacklogStatus libraryStatus = backlogStatus(game.id);
-        fillRoundedRect(renderer, 270, 32, 112, 34, 10,
-                        libraryStatus == vitrine::BacklogStatus::None ? color(20, 27, 43, 220) :
-                                                                       color(48, 74, 142, 230));
-        text.draw(renderer, libraryStatus == vitrine::BacklogStatus::None ? "+  Lista" :
-                  vitrine::backlogStatusLabel(libraryStatus), 281, 39, 18,
-                  color(224, 230, 246), 92);
+        text.draw(renderer, "NINTENDO SWITCH   |   " + std::string(vitrine::gameTypeLabel(game.type)),
+                  42, 34, 18, color(155, 186, 231));
+        text.draw(renderer, game.title, 42, 70, 42, color(247, 249, 253), 760);
+        text.draw(renderer, metadata, 42, 126, 18, color(184, 199, 223), 790);
 
-        fillRoundedRect(renderer, 32, 430, 5, 92, 2, color(112, 130, 255));
-        text.drawWrapped(renderer, game.tagline, 52, 424, 28, color(245, 247, 252), 320, 3);
-        text.draw(renderer, game.studio, 52, 548, 18, color(224, 230, 246), 320);
-        if (!game.publisher.empty()) {
-            text.draw(renderer, "Publicadora: " + game.publisher, 52, 578, 18,
-                      color(192, 202, 225), 320);
-        }
-        text.draw(renderer, release, 52, 608, 18, color(192, 202, 225), 320);
-
-        text.draw(renderer, "NINTENDO SWITCH  /  " + std::string(vitrine::gameTypeLabel(game.type)),
-                  454, 38, 18, color(151, 167, 255));
-        text.draw(renderer, game.title, 454, 68, 42, color(246, 248, 252), 626);
-        fillRoundedRect(renderer, 1102, 42, 104, 78, 16, color(24, 34, 55));
-        text.draw(renderer, "NOTA", 1132, 52, 18, color(126, 139, 167));
-        const std::string score = game.score > 0 ? scoreText(game.score) : "--";
+        const std::string score = game.score > 0.0f ? scoreText(game.score) : "--";
+        fillRoundedRect(renderer, 42, 164, 72, 48, 10,
+                        game.score > 0.0f ? color(34, 162, 91, 242) : color(46, 57, 76, 235));
         const int scoreWidth = text.width(score, 28);
-        text.draw(renderer, score, 1154 - scoreWidth / 2, 78, 28,
-                  game.score > 0 ? color(116, 235, 181) : color(180, 190, 210));
+        text.draw(renderer, score, 78 - scoreWidth / 2, 173, 28, color(247, 252, 249));
+        text.draw(renderer, game.sourceName.empty() ? "NOTA" : game.sourceName,
+                  126, 177, 18, color(220, 228, 240));
 
-        text.draw(renderer, genres, 456, 126, 18, color(137, 153, 190), 710);
-        text.draw(renderer, credits, 456, 153, 18, color(157, 170, 199), 710);
-        text.draw(renderer, discoveryFacts, 456, 180, 18, color(151, 167, 190), 710);
-        text.draw(renderer, "SOBRE O JOGO", 454, 207, 18, color(119, 136, 175));
-        fillRoundedRect(renderer, 454, 237, 4, 67, 2, color(112, 130, 255));
+        fillRoundedRect(renderer, 194, 166, 2, 44, 1, color(76, 92, 117, 190));
+        text.draw(renderer, game.averagePlaytime ? "TEMPO MEDIO" : "HISTORIA",
+                  216, 160, 18, color(132, 151, 183));
+        text.draw(renderer, game.mainHours > 0.0f ? hoursText(game.mainHours) : "--",
+                  216, 184, 22, color(241, 245, 251));
+        fillRoundedRect(renderer, 354, 166, 2, 44, 1, color(76, 92, 117, 190));
+        text.draw(renderer, "COMPLETAR", 376, 160, 18, color(132, 151, 183));
+        text.draw(renderer, game.completionHours > 0.0f ? hoursText(game.completionHours) : "--",
+                  376, 184, 22, color(241, 245, 251));
+        if (!facts.empty()) text.draw(renderer, facts, 516, 177, 18, color(184, 199, 223), 360);
+
         const std::string editorialDescription = game.description.empty() ? game.tagline : game.description;
-        text.drawWrapped(renderer, editorialDescription, 474, 229, 22, color(211, 218, 234), 716, 3);
+        fillRoundedRect(renderer, 42, 237, 5, 78, 2, color(112, 225, 255));
+        text.drawWrapped(renderer, editorialDescription, 62, 229, 22,
+                         color(218, 225, 238), 760, 3);
 
-        drawMetric(renderer, text, 454, 322, 244, "LANCAMENTO", release);
-        drawMetric(renderer, text, 714, 322, 244, game.averagePlaytime ? "TEMPO MEDIO" : "HISTORIA",
-                   game.mainHours > 0.0f ? hoursText(game.mainHours) : "--");
-        drawMetric(renderer, text, 974, 322, 244, "COMPLETAR",
-                   game.completionHours > 0.0f ? hoursText(game.completionHours) : "--");
-
-        const std::string galleryTitle = game.videosCount > 0
-            ? "GALERIA  •  " + std::to_string(game.videosCount) +
-                  (game.videosCount == 1 ? " VIDEO" : " VIDEOS")
-            : "GALERIA";
-        text.draw(renderer, galleryTitle, 454, 452, 18, color(119, 136, 175));
+        const bool favorite = isFavorite(game.id);
+        const vitrine::BacklogStatus libraryStatus = backlogStatus(game.id);
         if (!detailScreenshots_.empty()) {
-            text.draw(renderer, std::to_string(detailScreenshots_.size()) +
-                      " imagens   ← / →  Alternar   A  Tela cheia", 824, 452, 18,
-                      color(151, 167, 255));
-            const std::size_t thumbnailCount = std::min<std::size_t>(3, detailScreenshots_.size());
+            drawDetailAction(renderer, text, 42, 334, 168, "A", "Ver imagem", true, false);
+        }
+        drawDetailAction(renderer, text, 226, 334, 216, "ZR",
+                         libraryStatus == vitrine::BacklogStatus::None
+                             ? "Minha lista"
+                             : vitrine::backlogStatusLabel(libraryStatus),
+                         false, libraryStatus != vitrine::BacklogStatus::None);
+        drawDetailAction(renderer, text, 458, 334, 208, "L3",
+                         favorite ? "Remover" : "Favoritar", false, favorite);
+        drawDetailAction(renderer, text, 682, 334, 210, "Y", "Semelhantes", false, false);
+
+        const std::string galleryTitle = "IMAGENS";
+        text.draw(renderer, galleryTitle, 42, 414, 18, color(151, 181, 224));
+        if (!detailScreenshots_.empty()) {
+            const std::string galleryHint = std::to_string(screenshotIndex_ + 1) + " / " +
+                std::to_string(detailScreenshots_.size()) + "     ← / →  Selecionar     A  Tela cheia";
+            text.draw(renderer, galleryHint, 853, 414, 18, color(184, 204, 235), 385);
+            const std::size_t thumbnailCount = std::min<std::size_t>(6, detailScreenshots_.size());
             for (std::size_t index = 0; index < thumbnailCount; ++index) {
-                const int x = 454 + static_cast<int>(index) * 252;
-                if (static_cast<int>(index) == screenshotIndex_) {
-                    fillRoundedRect(renderer, x - 4, 479, 240, 130, 11, color(112, 130, 255));
+                const int x = 42 + static_cast<int>(index) * 200;
+                const bool selected = static_cast<int>(index) == screenshotIndex_;
+                if (selected) {
+                    fillRoundedRect(renderer, x - 6, 443, 200, 126, 12, color(34, 181, 255, 85));
+                    fillRoundedRect(renderer, x - 3, 446, 194, 120, 10, color(112, 225, 255));
                 }
-                fillRoundedRect(renderer, x, 483, 232, 122, 8, color(20, 28, 46));
-                images.drawCover(renderer, detailScreenshots_[index], x + 3, 486, 226, 116);
+                fillRoundedRect(renderer, x, 449, 188, 114, 8, color(19, 28, 45));
+                images.drawCover(renderer, detailScreenshots_[index], x + 3, 452, 182, 108);
             }
         } else {
-            fillRoundedRect(renderer, 454, 483, 764, 122, 14, color(19, 27, 44));
-            text.draw(renderer, screenshotLoading_ ? "Buscando detalhes e screenshots..." :
-                                                    "Screenshots indisponiveis para este item.",
-                      482, 529, 18, color(146, 158, 184));
+            fillRoundedRect(renderer, 42, 449, 1196, 114, 12, color(12, 20, 34, 224));
+            text.draw(renderer, screenshotLoading_ ? "Carregando detalhes e imagens..." :
+                                                    "Imagens indisponiveis para este jogo.",
+                      72, 491, 22, color(182, 195, 218));
         }
-        text.draw(renderer, "Somente informacao • este app nao baixa nem instala conteudo.",
-                  454, 620, 18, color(131, 144, 173));
-        if (!game.sourceName.empty()) text.draw(renderer, "Dados: " + game.sourceName, 454, 645, 18, color(137, 153, 190));
-        text.draw(renderer, "ZR  Minha lista", 548, 669, 18, color(151, 167, 255));
-        text.draw(renderer, "Y  Semelhantes", 700, 669, 18, color(151, 167, 255));
-        text.draw(renderer, favorite ? "L3  Remover" : "L3  + Favoritar",
-                  900, 669, 18, color(232, 220, 255));
-        text.draw(renderer, "B  Voltar", 1093, 669, 18, color(203, 211, 227));
+
+        text.draw(renderer, "Somente informacao • o Vitrine nao baixa nem executa jogos.",
+                  42, 608, 18, color(143, 158, 184));
+        if (!game.sourceName.empty()) {
+            text.draw(renderer, "Dados: " + game.sourceName, 1100, 608, 18,
+                      color(151, 181, 224), 138);
+        }
+
+        fillRect(renderer, 0, 652, kWidth, 68, color(5, 10, 20, 248));
+        fillRect(renderer, 0, 652, kWidth, 1, color(38, 111, 190, 190));
+        drawKeyHint(renderer, text, 42, 670, "B", "Voltar");
+        if (!detailScreenshots_.empty()) {
+            text.draw(renderer, "← / →  Imagens", 174, 674, 18, color(166, 190, 225));
+            drawKeyHint(renderer, text, 344, 670, "A", "Tela cheia", true);
+        }
+        drawKeyHint(renderer, text, 508, 670, "ZR", "Minha lista");
+        drawKeyHint(renderer, text, 672, 670, "Y", "Semelhantes");
+        drawKeyHint(renderer, text, 842, 670, "L3", favorite ? "Remover" : "Favoritar");
     }
 
     void renderScreenshotFullscreen(SDL_Renderer* renderer, TextRenderer& text,
@@ -2232,6 +2504,7 @@ private:
     bool usingApi_ = false;
     bool hasMore_ = false;
     std::string status_;
+    std::vector<SimilarReturnPoint> similarReturnStack_;
     std::vector<vitrine::Game> discoveryReturnGames_;
     vitrine::CatalogFilter discoveryReturnFilter_{};
     int discoveryReturnGenreIndex_ = 0;
