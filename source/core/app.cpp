@@ -333,9 +333,9 @@ bool App::handleTouch(const Input& touch, Input& mappedInput) {
                 return true;
             }
         } else {
-            static const int widths[] = {76, 112, 132, 158, 82, 164};
+            static const int widths[] = {76, 112, 132, 158, 82, 164, 110};
             int chipX = 150;
-            for (int index = 0; index < 6; ++index) {
+            for (int index = 0; index < 7; ++index) {
                 if (contains(x, y, chipX - 4, 147, widths[index] + 8, 42)) {
                     discoveryCursor_ = index;
                     touchPreviewActive_ = false;
@@ -1014,15 +1014,15 @@ const char* App::discoveryLabel(int index) const {
 
 std::string App::activeDiscoverySlug() const {
     static const char* slugs[] = {
-        "", "popular", "releases", "top-rated", "indies", "hidden-gems"
+        "", "popular", "releases", "top-rated", "indies", "hidden-gems", "upcoming"
     };
-    return slugs[std::max(0, std::min(discoveryIndex_, 5))];
+    return slugs[std::max(0, std::min(discoveryIndex_, 6))];
 }
 
 void App::updateDiscoverySourceOrdering() {
     filter_.preserveSourceOrder =
         ((discoveryIndex_ == 1 || discoveryIndex_ == 4) && filter_.sort == SortMode::Popular) ||
-        (discoveryIndex_ == 2 && filter_.sort == SortMode::Release);
+        ((discoveryIndex_ == 2 || discoveryIndex_ == 6) && filter_.sort == SortMode::Release);
 }
 
 void App::captureDiscoveryReturnPoint() {
@@ -1060,7 +1060,7 @@ void App::restoreDiscoveryReturnPoint() {
 }
 
 void App::applyDiscoverySection(int nextIndex) {
-    nextIndex = std::max(0, std::min(nextIndex, 5));
+    nextIndex = std::max(0, std::min(nextIndex, 6));
     if (nextIndex == 0) {
         restoreDiscoveryReturnPoint();
         return;
@@ -1078,7 +1078,7 @@ void App::applyDiscoverySection(int nextIndex) {
     discoveryCursor_ = nextIndex;
     filter_.sort = nextIndex == 1 || nextIndex == 4
         ? SortMode::Popular
-        : (nextIndex == 2 ? SortMode::Release : SortMode::Score);
+        : ((nextIndex == 2 || nextIndex == 6) ? SortMode::Release : SortMode::Score);
     updateDiscoverySourceOrdering();
     status_ = "Carregando " + std::string(discoveryLabel(nextIndex)) + "...";
     const ApiResult result = fetchPage(activeGenreSlug(), 1, filter_.query);
@@ -1107,7 +1107,7 @@ void App::applyDiscoverySection(int nextIndex) {
 
 void App::handleDiscoveryRibbon(const Input& input) {
     if (input.left && discoveryCursor_ > 0) --discoveryCursor_;
-    if (input.right && discoveryCursor_ < 5) ++discoveryCursor_;
+    if (input.right && discoveryCursor_ < 6) ++discoveryCursor_;
     if (input.down) {
         discoveryFocus_ = false;
         status_ = discoveryIndex_ == 0 ? "Catalogo completo" : discoveryLabel(discoveryIndex_);

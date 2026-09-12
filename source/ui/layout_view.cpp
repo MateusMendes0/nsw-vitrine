@@ -7,9 +7,9 @@ namespace vitrine {
 
 const char* LayoutView::discoveryLabel(int index) {
     static const char* labels[] = {
-        "Todos", "Populares", "Lancamentos", "Bem avaliados", "Indies", "Joias escondidas"
+        "Todos", "Populares", "Lancamentos", "Bem avaliados", "Indies", "Joias escondidas", "Em breve"
     };
-    return labels[std::max(0, std::min(index, 5))];
+    return labels[std::max(0, std::min(index, 6))];
 }
 
 void LayoutView::renderBackground(SDL_Renderer* renderer) {
@@ -111,9 +111,9 @@ void LayoutView::renderDiscoveryRibbon(SDL_Renderer* renderer, TextRenderer& tex
         return;
     }
     text.draw(renderer, "DESCOBRIR", 42, 158, 18, color(112, 126, 157));
-    static const int widths[] = {76, 112, 132, 158, 82, 164};
+    static const int widths[] = {76, 112, 132, 158, 82, 164, 110};
     int x = 150;
-    for (int index = 0; index < 6; ++index) {
+    for (int index = 0; index < 7; ++index) {
         const bool active = index == discoveryIndex;
         const bool focused = discoveryFocus && index == discoveryCursor;
         if (focused) {
