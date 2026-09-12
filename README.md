@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Versão-1.2.0-blue.svg" alt="Versão 1.2.0">
+  <img src="https://img.shields.io/badge/Versão-1.0.0-blue.svg" alt="Versão 1.0.0">
   <img src="https://img.shields.io/badge/Plataforma-Nintendo%20Switch-e60012.svg" alt="Nintendo Switch">
   <img src="https://img.shields.io/badge/Linguagem-C%2B%2B17%20%7C%20libnx-00599C.svg" alt="C++17 / libnx">
   <img src="https://img.shields.io/badge/UI-SDL2-228B22.svg" alt="SDL2">
@@ -43,6 +43,7 @@
 - **Busca Rápida**: Integração nativa com o teclado virtual oficial do Switch.
 - **Modo Touch**: Navegação direta pela tela portátil com arrasto contínuo da grade, toque em abas, filtros, capas, ações e modais. O primeiro toque em uma capa revela o resumo; o segundo abre os detalhes.
 - **Desempenho e Cache Offline**: Sistema de fila de downloads não bloqueante para capas e capturas, com persistência local no cartão SD para carregamento instantâneo.
+- **Atualizações Seguras**: Verificação automática de novas versões no GitHub, confirmação antes de instalar, validação SHA-256 e backup do NRO anterior.
 
 ---
 
@@ -98,6 +99,21 @@ No terminal do devkitPro (MSYS2):
 make
 ```
 O arquivo gerado será `switch-vitrine.nro` na raiz do repositório.
+
+### Builds automáticas e releases
+
+O GitHub Actions compila o NRO em cada push e pull request usando o ambiente
+oficial do devkitPro. Para publicar uma release, atualize o arquivo `VERSION`,
+faça o commit e crie uma tag com a mesma versão:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+O workflow publica automaticamente o NRO, o SHA-256 e um ZIP pronto para ser
+extraído na raiz do cartão SD. O Vitrine consulta apenas releases estáveis e
+sempre pede confirmação antes de instalar uma atualização.
 
 ### Testes da Lógica no PC
 A lógica de ordenação, catálogo e modelos pode ser testada localmente em qualquer computador com CMake, sem necessidade de emulador ou SDK do Switch:

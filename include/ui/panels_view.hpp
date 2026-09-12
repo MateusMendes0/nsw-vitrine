@@ -4,6 +4,7 @@
 #include "draw_utils.hpp"
 #include "text_renderer.hpp"
 #include "ui_constants.hpp"
+#include "updater.hpp"
 
 #include <SDL2/SDL.h>
 
@@ -29,7 +30,12 @@ public:
                      int aboutOption, bool networkReady, bool apiInitialized,
                      bool initialSyncRunning, bool usingApi,
                      std::uint64_t aboutCacheBytes, const std::string& aboutMessage,
-                     bool aboutConfirmClear);
+                     bool aboutConfirmClear, const std::string& updateSubtitle);
+
+    void renderUpdateDialog(SDL_Renderer* renderer, TextRenderer& text,
+                            UpdateDialogState state, const UpdateInfo& info,
+                            int option, std::uint64_t downloadedBytes,
+                            const std::string& message);
 
     static std::string filterOptionLabel(int filterSection, int index,
                                          const std::vector<std::string>& genres);

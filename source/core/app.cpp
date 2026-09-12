@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <utility>
 
 namespace vitrine {
 
@@ -13,9 +14,10 @@ bool contains(int x, int y, int left, int top, int width, int height) {
 
 }  // namespace
 
-App::App(bool networkReady)
+App::App(bool networkReady, std::string executablePath)
     : favoriteCatalog_(std::vector<Game>{}),
       backlogCatalog_(std::vector<Game>{}),
+      updater_(std::move(executablePath)),
       networkReady_(networkReady) {
     surpriseSeed_ ^= SDL_GetTicks();
     apiInitialized_ = api_.initialize();
@@ -44,9 +46,11 @@ App::App(bool networkReady)
     coverWorker_ = std::thread([this]() { coverWorkerLoop(); });
     queueVisibleCovers();
     startInitialSync();
+    startUpdateCheck(false);
 }
 
 App::~App() {
+    updateCancelRequested_.store(true);
     {
         std::lock_guard<std::mutex> lock(coverMutex_);
         stopCoverWorker_ = true;
@@ -56,6 +60,8 @@ App::~App() {
     if (screenshotThread_.joinable()) screenshotThread_.join();
     if (initialSyncThread_.joinable()) initialSyncThread_.join();
     if (nextPageThread_.joinable()) nextPageThread_.join();
+    if (updateCheckThread_.joinable()) updateCheckThread_.join();
+    if (updateInstallThread_.joinable()) updateInstallThread_.join();
 }
 
 void App::releaseRendererResources() {
@@ -162,7 +168,7 @@ bool App::handleTouch(const Input& touch, Input& mappedInput) {
             return true;
         }
         if (contains(x, y, 174, 390, 932, 120)) {
-            aboutOption_ = std::min(2, std::max(0, (x - 178) / 308));
+            aboutOption_ = std::min(3, std::max(0, (x - 178) / 232));
             action.accept = true;
         } else if (!contains(x, y, 130, 48, 1020, 624) || contains(x, y, 960, 604, 160, 58)) {
             action.back = true;
@@ -483,6 +489,129 @@ void App::openAbout() {
     aboutMessage_.clear();
 }
 
+std::string App::aboutUpdateSubtitle() const {
+    if (!updater_.canInstall()) return "Indisponivel neste modo";
+    if (updateCheckRunning_) return "Verificando nova versao";
+    if (updateInfo_.available) return "v" + updateInfo_.version + " disponivel";
+    return "Buscar nova versao";
+}
+
+void App::startUpdateCheck(bool manual) {
+    if (updateCheckRunning_ || updateInstallRunning_) return;
+    if (!networkReady_ || !apiInitialized_) {
+        if (manual) aboutMessage_ = "Sem conexao para verificar atualizacoes";
+        return;
+    }
+    if (!updater_.canInstall()) {
+        if (manual) aboutMessage_ = "Atualizacao disponivel apenas no Nintendo Switch";
+        return;
+    }
+    if (updateCheckThread_.joinable()) updateCheckThread_.join();
+    updateCheckManual_ = manual;
+    updateCheckRunning_ = true;
+    updateCheckDone_.store(false);
+    pendingUpdateInfo_ = {};
+    pendingUpdateError_.clear();
+    pendingUpdateCheckSuccess_ = false;
+    if (manual) aboutMessage_ = "Verificando atualizacoes no GitHub...";
+    updateCheckThread_ = std::thread([this]() {
+        pendingUpdateCheckSuccess_ = updater_.check(pendingUpdateInfo_, pendingUpdateError_);
+        updateCheckDone_.store(true);
+    });
+}
+
+void App::finishUpdateCheck() {
+    if (!updateCheckRunning_ || !updateCheckDone_.load()) return;
+    if (updateCheckThread_.joinable()) updateCheckThread_.join();
+    updateCheckRunning_ = false;
+    const bool manual = updateCheckManual_;
+    updateCheckManual_ = false;
+    if (!pendingUpdateCheckSuccess_) {
+        if (manual) aboutMessage_ = pendingUpdateError_.empty()
+            ? "Nao foi possivel verificar atualizacoes" : pendingUpdateError_;
+        return;
+    }
+    updateInfo_ = pendingUpdateInfo_;
+    if (!updateInfo_.available) {
+        if (manual) aboutMessage_ = "Voce ja esta usando a versao mais recente";
+        return;
+    }
+    aboutMessage_ = "Nova versao disponivel: v" + updateInfo_.version;
+    if (manual || !updateIgnored_) openUpdateDialog();
+}
+
+void App::openUpdateDialog() {
+    if (!updateInfo_.available || updateInstallRunning_) return;
+    updateDialogOption_ = 0;
+    updateDialogMessage_.clear();
+    updateDialogState_ = UpdateDialogState::Available;
+}
+
+void App::startUpdateInstall() {
+    if (updateInstallRunning_ || !updateInfo_.available) return;
+    if (updateInstallThread_.joinable()) updateInstallThread_.join();
+    updateInstallRunning_ = true;
+    updateInstallDone_.store(false);
+    updateCancelRequested_.store(false);
+    updateDownloadedBytes_.store(0);
+    pendingUpdateInstallResult_ = {};
+    updateDialogMessage_ = "Baixando e validando a nova versao...";
+    updateDialogState_ = UpdateDialogState::Installing;
+    updateInstallThread_ = std::thread([this]() {
+        pendingUpdateInstallResult_ = updater_.install(
+            updateInfo_, updateDownloadedBytes_, updateCancelRequested_);
+        updateInstallDone_.store(true);
+    });
+}
+
+void App::finishUpdateInstall() {
+    if (!updateInstallRunning_ || !updateInstallDone_.load()) return;
+    if (updateInstallThread_.joinable()) updateInstallThread_.join();
+    updateInstallRunning_ = false;
+    updateDialogMessage_ = pendingUpdateInstallResult_.message;
+    if (pendingUpdateInstallResult_.success) {
+        updateDialogState_ = UpdateDialogState::Installed;
+        status_ = "Vitrine v" + updateInfo_.version + " instalada";
+    } else if (pendingUpdateInstallResult_.cancelled) {
+        updateDialogState_ = UpdateDialogState::Available;
+        aboutMessage_ = pendingUpdateInstallResult_.message;
+    } else {
+        updateDialogState_ = UpdateDialogState::Error;
+        aboutMessage_ = pendingUpdateInstallResult_.message;
+    }
+}
+
+void App::handleUpdateDialog(const Input& input) {
+    if (updateDialogState_ == UpdateDialogState::Available) {
+        if (input.left) updateDialogOption_ = 0;
+        if (input.right) updateDialogOption_ = 1;
+        if (input.back) updateDialogOption_ = 1;
+        if (!input.accept && !input.back) return;
+        if (updateDialogOption_ == 0 && input.accept) {
+            startUpdateInstall();
+        } else {
+            updateIgnored_ = true;
+            updateDialogState_ = UpdateDialogState::Hidden;
+            aboutMessage_ = "Atualizacao ignorada por enquanto";
+        }
+        return;
+    }
+    if (updateDialogState_ == UpdateDialogState::Installing) {
+        if (input.back) {
+            updateCancelRequested_.store(true);
+            updateDialogMessage_ = "Cancelando; a versao atual sera preservada...";
+        }
+        return;
+    }
+    if (updateDialogState_ == UpdateDialogState::Installed) {
+        if (input.accept || input.back) quitRequested_ = true;
+        return;
+    }
+    if (updateDialogState_ == UpdateDialogState::Error && (input.accept || input.back)) {
+        updateDialogState_ = UpdateDialogState::Hidden;
+    }
+}
+
 void App::handleAbout(const Input& input) {
     if (aboutConfirmClear_) {
         if (input.back) {
@@ -520,12 +649,15 @@ void App::handleAbout(const Input& input) {
         return;
     }
     if (input.left && aboutOption_ > 0) --aboutOption_;
-    if (input.right && aboutOption_ < 2) ++aboutOption_;
+    if (input.right && aboutOption_ < 3) ++aboutOption_;
     if (!input.accept) return;
     if (aboutOption_ == 0) {
         about_ = false;
         synchronizeCatalog();
     } else if (aboutOption_ == 1) {
+        if (updateInfo_.available) openUpdateDialog();
+        else startUpdateCheck(true);
+    } else if (aboutOption_ == 2) {
         aboutConfirmClear_ = true;
         aboutMessage_.clear();
     } else {
@@ -1529,6 +1661,29 @@ void App::handle(const Input& input) {
     finishInitialSync();
     finishNextPageLoad();
     finishScreenshotLoad();
+    finishUpdateCheck();
+    finishUpdateInstall();
+    if (updateDialogState_ != UpdateDialogState::Hidden) {
+        Input dialogInput = input;
+        if (input.touchReleased) {
+            dialogInput = {};
+            if (updateDialogState_ == UpdateDialogState::Available) {
+                if (contains(input.touchX, input.touchY, 300, 500, 286, 70)) {
+                    updateDialogOption_ = 0;
+                    dialogInput.accept = true;
+                } else if (contains(input.touchX, input.touchY, 694, 500, 286, 70)) {
+                    updateDialogOption_ = 1;
+                    dialogInput.accept = true;
+                }
+            } else if (updateDialogState_ == UpdateDialogState::Installing) {
+                if (contains(input.touchX, input.touchY, 760, 548, 220, 56)) dialogInput.back = true;
+            } else {
+                dialogInput.accept = true;
+            }
+        }
+        handleUpdateDialog(dialogInput);
+        return;
+    }
     Input resolvedInput = input;
     const bool controllerInput = input.up || input.down || input.left || input.right ||
         input.accept || input.back || input.search || input.sort || input.previousGenre ||
@@ -1749,9 +1904,15 @@ void App::render(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer& imag
     if (about_) {
         panelsView_.renderAbout(renderer, text, aboutOption_, networkReady_,
                                 apiInitialized_, initialSyncRunning_, usingApi_,
-                                aboutCacheBytes_, aboutMessage_, aboutConfirmClear_);
+                                aboutCacheBytes_, aboutMessage_, aboutConfirmClear_,
+                                aboutUpdateSubtitle());
     }
     layoutView_.renderTabTransition(renderer, tabTransitionStart_, details_, detailClosing_);
+    if (updateDialogState_ != UpdateDialogState::Hidden) {
+        panelsView_.renderUpdateDialog(renderer, text, updateDialogState_, updateInfo_,
+                                       updateDialogOption_, updateDownloadedBytes_.load(),
+                                       updateDialogMessage_);
+    }
 }
 
 }  // namespace vitrine

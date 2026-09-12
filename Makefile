@@ -16,12 +16,12 @@ INCLUDES     := include include/core include/ui
 
 APP_TITLE    := Vitrine
 APP_AUTHOR   := Mateus Mendes
-APP_VERSION  := 1.2.0
+APP_VERSION  := $(strip $(shell cat $(TOPDIR)/VERSION))
 
 ARCH         := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 CFLAGS       := -g -Wall -Wextra -O2 -ffunction-sections $(ARCH) $(DEFINES)
 CFLAGS       += -D__SWITCH__ $(INCLUDE) `aarch64-none-elf-pkg-config --cflags SDL2_ttf libcurl jansson SDL2_image`
-CXXFLAGS     := $(CFLAGS) -std=gnu++17 -fno-rtti -fno-exceptions
+CXXFLAGS     := $(CFLAGS) -std=gnu++17 -fno-rtti -fno-exceptions -DVITRINE_VERSION='"$(APP_VERSION)"'
 ASFLAGS      := -g $(ARCH)
 LDFLAGS      := -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 # Use the ports' metadata instead of maintaining transitive static dependencies.

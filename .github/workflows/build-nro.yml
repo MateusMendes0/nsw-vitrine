@@ -1,0 +1,82 @@
+name: Build Nintendo Switch NRO
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build NRO
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:20260219
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: test "$(cat VERSION)" = "${GITHUB_REF_NAME#v}"
+
+      - name: Build
+        run: make -j2
+
+      - name: Validate NRO
+        shell: bash
+        run: |
+          test -s switch-vitrine.nro
+          test "$(dd if=switch-vitrine.nro bs=1 skip=16 count=4 2>/dev/null)" = "NRO0"
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/package/switch/switch-vitrine
+          cp switch-vitrine.nro dist/switch-vitrine.nro
+          cp switch-vitrine.nro dist/package/switch/switch-vitrine/switch-vitrine.nro
+          sha256sum dist/switch-vitrine.nro > dist/switch-vitrine.nro.sha256
+          cd dist/package
+          zip -r9 ../switch-vitrine.zip switch
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: switch-vitrine-${{ github.sha }}
+          path: |
+            dist/switch-vitrine.nro
+            dist/switch-vitrine.nro.sha256
+            dist/switch-vitrine.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: switch-vitrine-${{ github.sha }}
+          path: dist
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --repo "$GITHUB_REPOSITORY"
+          --title "Vitrine ${GITHUB_REF_NAME#v}"
+          --generate-notes
+          --verify-tag

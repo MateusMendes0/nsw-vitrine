@@ -1,5 +1,6 @@
 #include "catalog.hpp"
 #include "input.hpp"
+#include "update_utils.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -58,6 +59,13 @@ int main() {
     assert(std::string(vitrine::backlogStatusLabel(vitrine::BacklogStatus::Completed)) == "Finalizado");
 
     assert(vitrine::normalizeForSearch("Ação e Simulação") == "acao e simulacao");
+    assert(vitrine::compareSemanticVersions("1.0.0", "v1.0.1") < 0);
+    assert(vitrine::compareSemanticVersions("v2.0", "1.9.9") > 0);
+    assert(vitrine::compareSemanticVersions("1.0.0+build", "1.0") == 0);
+    assert(vitrine::sha256Hex("") ==
+           "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    assert(vitrine::sha256Hex("abc") ==
+           "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 
     vitrine::Input touch;
     touch.touchReleased = true;

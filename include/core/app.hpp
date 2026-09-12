@@ -7,6 +7,7 @@
 #include "input.hpp"
 #include "layout_view.hpp"
 #include "panels_view.hpp"
+#include "updater.hpp"
 
 #include <SDL2/SDL.h>
 
@@ -53,7 +54,7 @@ struct SimilarReturnPoint {
 
 class App {
 public:
-    explicit App(bool networkReady);
+    explicit App(bool networkReady, std::string executablePath = {});
     ~App();
 
     void handle(const Input& input);
@@ -77,6 +78,13 @@ private:
     void switchMainTab(int direction);
     void openAbout();
     void handleAbout(const Input& input);
+    void startUpdateCheck(bool manual);
+    void finishUpdateCheck();
+    void openUpdateDialog();
+    void handleUpdateDialog(const Input& input);
+    void startUpdateInstall();
+    void finishUpdateInstall();
+    std::string aboutUpdateSubtitle() const;
     BacklogStatus backlogStatus(const std::string& id) const;
     void setBacklogStatus(const Game& source, BacklogStatus newStatus);
     void openBacklogPanel(const Game& game, bool fromDetails);
@@ -135,6 +143,7 @@ private:
     Catalog backlogCatalog_;
     CatalogFilter filter_;
     CatalogApiClient api_;
+    AppUpdater updater_;
     std::vector<std::string> genres_;
     std::vector<const Game*> games_;
     int genreIndex_ = 0;
@@ -210,6 +219,24 @@ private:
     std::string pendingNextPageStatus_;
     std::string pendingNextPageDiscovery_;
     int pendingNextPageMinRating_ = 0;
+    std::thread updateCheckThread_;
+    std::atomic<bool> updateCheckDone_{false};
+    UpdateInfo pendingUpdateInfo_{};
+    std::string pendingUpdateError_;
+    bool pendingUpdateCheckSuccess_ = false;
+    bool updateCheckRunning_ = false;
+    bool updateCheckManual_ = false;
+    std::thread updateInstallThread_;
+    std::atomic<bool> updateInstallDone_{false};
+    std::atomic<bool> updateCancelRequested_{false};
+    std::atomic<std::uint64_t> updateDownloadedBytes_{0};
+    UpdateInstallResult pendingUpdateInstallResult_{};
+    bool updateInstallRunning_ = false;
+    bool updateIgnored_ = false;
+    UpdateInfo updateInfo_{};
+    UpdateDialogState updateDialogState_ = UpdateDialogState::Hidden;
+    int updateDialogOption_ = 0;
+    std::string updateDialogMessage_;
     bool screenshotLoading_ = false;
     bool screenshotQueued_ = false;
     bool pendingDetailLoaded_ = false;

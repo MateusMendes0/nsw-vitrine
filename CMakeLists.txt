@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 project(switch_vitrine_core LANGUAGES CXX)
 
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" VITRINE_VERSION LIMIT_COUNT 1)
+if(NOT VITRINE_VERSION)
+    message(FATAL_ERROR "VERSION must contain the application version")
+endif()
+add_compile_definitions(VITRINE_VERSION="${VITRINE_VERSION}")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -8,6 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(vitrine_core
     source/core/catalog.cpp
     source/core/input.cpp
+    source/core/update_utils.cpp
 )
 target_include_directories(vitrine_core PUBLIC include include/core)
 
@@ -34,6 +41,7 @@ if(VITRINE_BUILD_DESKTOP_APP)
         source/main.cpp
         source/core/api_client.cpp
         source/core/app.cpp
+        source/core/updater.cpp
         source/ui/details_view.cpp
         source/ui/draw_utils.cpp
         source/ui/grid_view.cpp

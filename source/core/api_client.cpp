@@ -1,4 +1,5 @@
 #include "api_client.hpp"
+#include "ui_constants.hpp"
 
 #include <curl/curl.h>
 #include <jansson.h>
@@ -691,8 +692,10 @@ bool CatalogApiClient::request(const std::string& url, std::string& payload, std
     }
     DownloadBuffer buffer;
     buffer.limit = maxBytes;
+    const std::string userAgent = "Switch-Vitrine/" + std::string(kAppVersion) +
+                                  " (Nintendo Switch homebrew)";
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Switch-Vitrine/0.2 (Nintendo Switch homebrew)");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 25L);

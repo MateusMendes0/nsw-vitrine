@@ -18,8 +18,7 @@
 
 int main(int argc, char** argv) {
 #ifdef __SWITCH__
-    (void)argc;
-    (void)argv;
+    const std::string executablePath = argc > 0 && argv && argv[0] ? argv[0] : "";
 #else
     bool demoMode = false;
     for (int index = 1; index < argc; ++index) {
@@ -66,7 +65,13 @@ int main(int argc, char** argv) {
 #else
     if (demoMode) networkReady = false;
 #endif
-    vitrine::App app(networkReady);
+    vitrine::App app(networkReady,
+#ifdef __SWITCH__
+                     executablePath
+#else
+                     std::string()
+#endif
+    );
     vitrine::ImageRenderer images;
     bool running = true;
 #ifdef __SWITCH__
