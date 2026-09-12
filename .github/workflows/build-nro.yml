@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      version_override:
+        description: "Versao temporaria para testar o auto-updater (ex.: 0.9.0)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -26,8 +31,23 @@ jobs:
         shell: bash
         run: test "$(cat VERSION)" = "${GITHUB_REF_NAME#v}"
 
+      - name: Validate test version
+        if: inputs.version_override != ''
+        shell: bash
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+        run: '[[ "$VERSION_OVERRIDE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+
       - name: Build
-        run: make -j2
+        shell: bash
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+        run: |
+          if [[ -n "$VERSION_OVERRIDE" ]]; then
+            make -j2 APP_VERSION="$VERSION_OVERRIDE" APP_TITLE="Vitrine Updater Test"
+          else
+            make -j2
+          fi
 
       - name: Validate NRO
         shell: bash
@@ -37,22 +57,31 @@ jobs:
 
       - name: Package
         shell: bash
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
         run: |
-          mkdir -p dist/package/switch/switch-vitrine
-          cp switch-vitrine.nro dist/switch-vitrine.nro
-          cp switch-vitrine.nro dist/package/switch/switch-vitrine/switch-vitrine.nro
-          sha256sum dist/switch-vitrine.nro > dist/switch-vitrine.nro.sha256
+          if [[ -n "$VERSION_OVERRIDE" ]]; then
+            OUTPUT_NAME="vitrine-updater-test"
+            INSTALL_DIR="vitrine-updater-test"
+          else
+            OUTPUT_NAME="switch-vitrine"
+            INSTALL_DIR="switch-vitrine"
+          fi
+          mkdir -p "dist/package/switch/$INSTALL_DIR"
+          cp switch-vitrine.nro "dist/$OUTPUT_NAME.nro"
+          cp switch-vitrine.nro "dist/package/switch/$INSTALL_DIR/$OUTPUT_NAME.nro"
+          sha256sum "dist/$OUTPUT_NAME.nro" > "dist/$OUTPUT_NAME.nro.sha256"
           cd dist/package
-          zip -r9 ../switch-vitrine.zip switch
+          zip -r9 "../$OUTPUT_NAME.zip" switch
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: switch-vitrine-${{ github.sha }}
+          name: switch-vitrine-${{ inputs.version_override || github.sha }}
           path: |
-            dist/switch-vitrine.nro
-            dist/switch-vitrine.nro.sha256
-            dist/switch-vitrine.zip
+            dist/*.nro
+            dist/*.nro.sha256
+            dist/*.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -68,7 +97,7 @@ jobs:
       - name: Download build
         uses: actions/download-artifact@v4
         with:
-          name: switch-vitrine-${{ github.sha }}
+          name: switch-vitrine-${{ inputs.version_override || github.sha }}
           path: dist
 
       - name: Create GitHub release

@@ -115,6 +115,12 @@ O workflow publica automaticamente o NRO, o SHA-256 e um ZIP pronto para ser
 extraído na raiz do cartão SD. O Vitrine consulta apenas releases estáveis e
 sempre pede confirmação antes de instalar uma atualização.
 
+Para testar o auto-updater sem publicar outra release, abra **Actions → Build
+Nintendo Switch NRO → Run workflow**, preencha `version_override` com uma versão
+anterior, como `0.9.0`, e baixe o artefato produzido. O pacote de teste é
+instalado separadamente em `/switch/vitrine-updater-test/`; ao abri-lo, ele
+deve oferecer a release estável atual e nunca substituir a instalação principal.
+
 ### Testes da Lógica no PC
 A lógica de ordenação, catálogo e modelos pode ser testada localmente em qualquer computador com CMake, sem necessidade de emulador ou SDK do Switch:
 ```bash
