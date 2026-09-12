@@ -23,7 +23,24 @@ struct Input {
     bool surprise = false;
     bool sync = false;
     bool quit = false;
+    bool touchBegan = false;
+    bool touchActive = false;
+    bool touchReleased = false;
+    int touchStartX = 0;
+    int touchStartY = 0;
+    int touchX = 0;
+    int touchY = 0;
 };
+
+enum class TouchGestureDirection {
+    None,
+    Left,
+    Right,
+    Up,
+    Down,
+};
+
+TouchGestureDirection touchGestureDirection(const Input& input, int minimumDistance = 64);
 
 #ifdef __SWITCH__
 Input readSwitchInput(PadState& pad);

@@ -107,6 +107,10 @@ void GridView::drawCoverCard(SDL_Renderer* renderer, TextRenderer& text, ImageRe
         fillRoundedRect(renderer, cardX - 10, cardY - 10, cardWidth + 20, cardHeight + 20,
                         21, color(7, 10, 18, static_cast<Uint8>(245.0f * (1.0f - reveal))));
     }
+    if (focus > 0.01f) {
+        fillRoundedRect(renderer, cardX - 4, y, cardWidth + 8, 4, 2,
+                        color(112, 225, 255, static_cast<Uint8>(255.0f * focus)));
+    }
 }
 
 void GridView::drawCard(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer& images,
@@ -155,6 +159,7 @@ void GridView::drawCard(SDL_Renderer* renderer, TextRenderer& text, ImageRendere
         fillRoundedRect(renderer, x - 5, y - 5, 287, 226, 17,
                         color(7, 10, 18, static_cast<Uint8>(245.0f * (1.0f - reveal))));
     }
+    if (selected) fillRoundedRect(renderer, x - 5, y, 287, 4, 2, color(112, 130, 255));
 }
 
 void GridView::drawSelectedSummary(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer& images,
@@ -213,6 +218,7 @@ void GridView::render(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer&
                      int selected, int previousSelected,
                      Uint32 selectionAnimationStart, Uint32 gridRevealStart,
                      bool classicView, bool backlogTab, bool favoritesTab,
+                     bool showSummary, bool touchBrowse, int touchScrollY,
                      const std::function<bool(const std::string&)>& isFavorite,
                      const std::function<BacklogStatus(const std::string&)>& getBacklogStatus) {
     if (games.empty()) {
@@ -227,14 +233,18 @@ void GridView::render(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer&
     }
 
     const int columns = classicView ? kClassicColumns : kCoverColumns;
-    const int rows = classicView ? kClassicRows : kCoverRows;
+    const bool discoveryVisible = !backlogTab && !favoritesTab;
+    const int classicRowStride = discoveryVisible ? 236 : 244;
+    const int rowStride = classicView ? classicRowStride : 372;
+    const int rows = touchBrowse ? 3 :
+                     (classicView ? kClassicRows : kCoverRows);
     const int visibleCount = columns * rows;
     const int selectedRow = selected / columns;
-    const int firstRow = std::max(0, selectedRow - (rows - 1));
+    const int firstRow = touchBrowse ? touchScrollY / rowStride :
+                         std::max(0, selectedRow - (rows - 1));
     const int firstIndex = firstRow * columns;
-    const bool discoveryVisible = !backlogTab && !favoritesTab;
     const int gridY = discoveryVisible ? 190 : 160;
-    const int classicRowStride = discoveryVisible ? 236 : 244;
+    const int scrollRemainder = touchBrowse ? touchScrollY % rowStride : 0;
     int renderedGames = 0;
     for (int slot = 0; slot < visibleCount; ++slot) {
         const int index = firstIndex + slot;
@@ -246,17 +256,18 @@ void GridView::render(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer&
         const BacklogStatus bStatus = getBacklogStatus(games[index]->id);
         if (classicView) {
             drawCard(renderer, text, images, *games[index],
-                     42 + column * 307, gridY + row * classicRowStride,
-                     index == selected, reveal, isFav);
+                     42 + column * 307, gridY - scrollRemainder + row * classicRowStride,
+                     !touchBrowse && index == selected, reveal, isFav);
         } else {
-            const float focus = selectionFocus(index, selected, previousSelected, selectionAnimationStart);
+            const float focus = touchBrowse ? 0.0f :
+                selectionFocus(index, selected, previousSelected, selectionAnimationStart);
             drawCoverCard(renderer, text, images, *games[index],
-                          42 + column * 244, gridY + row * 372, focus, reveal,
+                          42 + column * 244, gridY - scrollRemainder + row * 372, focus, reveal,
                           isFav, bStatus);
         }
         ++renderedGames;
     }
-    if (!classicView && selected >= 0 && selected < static_cast<int>(games.size())) {
+    if (!classicView && showSummary && selected >= 0 && selected < static_cast<int>(games.size())) {
         const bool isFav = isFavorite(games[selected]->id);
         const BacklogStatus bStatus = getBacklogStatus(games[selected]->id);
         drawSelectedSummary(renderer, text, images, *games[selected],

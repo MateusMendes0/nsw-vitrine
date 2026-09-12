@@ -1,4 +1,5 @@
 #include "catalog.hpp"
+#include "input.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -57,6 +58,20 @@ int main() {
     assert(std::string(vitrine::backlogStatusLabel(vitrine::BacklogStatus::Completed)) == "Finalizado");
 
     assert(vitrine::normalizeForSearch("Ação e Simulação") == "acao e simulacao");
+
+    vitrine::Input touch;
+    touch.touchReleased = true;
+    touch.touchStartX = 500;
+    touch.touchStartY = 300;
+    touch.touchX = 390;
+    touch.touchY = 310;
+    assert(vitrine::touchGestureDirection(touch) == vitrine::TouchGestureDirection::Left);
+    touch.touchX = 515;
+    touch.touchY = 220;
+    assert(vitrine::touchGestureDirection(touch) == vitrine::TouchGestureDirection::Up);
+    touch.touchX = 530;
+    touch.touchY = 320;
+    assert(vitrine::touchGestureDirection(touch) == vitrine::TouchGestureDirection::None);
     std::cout << "catalog_tests: OK\n";
     return 0;
 }

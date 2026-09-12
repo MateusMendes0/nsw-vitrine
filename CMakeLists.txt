@@ -5,7 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_library(vitrine_core source/core/catalog.cpp)
+add_library(vitrine_core
+    source/core/catalog.cpp
+    source/core/input.cpp
+)
 target_include_directories(vitrine_core PUBLIC include include/core)
 
 enable_testing()
@@ -31,7 +34,6 @@ if(VITRINE_BUILD_DESKTOP_APP)
         source/main.cpp
         source/core/api_client.cpp
         source/core/app.cpp
-        source/core/input.cpp
         source/ui/details_view.cpp
         source/ui/draw_utils.cpp
         source/ui/grid_view.cpp

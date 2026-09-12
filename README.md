@@ -41,6 +41,7 @@
 - **Aba de Favoritos**: Acesso rápido à sua seleção pessoal independente de conexão com a internet.
 - **Surpreenda-me**: Sorteio aleatório de títulos respeitando os filtros e abas ativas.
 - **Busca Rápida**: Integração nativa com o teclado virtual oficial do Switch.
+- **Modo Touch**: Navegação direta pela tela portátil com arrasto contínuo da grade, toque em abas, filtros, capas, ações e modais. O primeiro toque em uma capa revela o resumo; o segundo abre os detalhes.
 - **Desempenho e Cache Offline**: Sistema de fila de downloads não bloqueante para capas e capturas, com persistência local no cartão SD para carregamento instantâneo.
 
 ---
@@ -61,6 +62,7 @@
 | **R3 (Pressionar Analógico Direito)** | Alternar entre visualização de **Capas** e **Modo Clássico** |
 | **- (Menos)** | Abrir tela *Sobre*, checagem de conexão e manutenção de cache |
 | **+ (Mais)** | Sair do aplicativo |
+| **Touch** | Arrastar para rolar a grade; tocar uma vez para ver o resumo e novamente para abrir; deslizar nas screenshots |
 
 ---
 

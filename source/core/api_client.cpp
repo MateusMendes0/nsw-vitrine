@@ -13,7 +13,11 @@
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#else
 #include <unistd.h>
+#endif
 #include <utility>
 
 namespace vitrine {
@@ -94,7 +98,12 @@ bool writeFile(const std::string& path, const std::string& contents) {
 }
 
 void createDirectory(const std::string& path) {
-    if (mkdir(path.c_str(), 0777) != 0 && errno != EEXIST) {
+#ifdef _WIN32
+    const int result = _mkdir(path.c_str());
+#else
+    const int result = mkdir(path.c_str(), 0777);
+#endif
+    if (result != 0 && errno != EEXIST) {
         // The caller will report a useful file-write error if creation failed.
     }
 }

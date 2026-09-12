@@ -61,11 +61,16 @@ public:
     void releaseRendererResources();
     void appendSearchText(const char* value);
     void eraseSearchCharacter();
+    bool quitRequested() const { return quitRequested_; }
 
 private:
     int gridColumns() const;
     int gridRows() const;
     int visibleGameCount() const;
+    bool handleTouch(const Input& touch, Input& mappedInput);
+    void updateTouchDrag(const Input& touch);
+    int touchGridStride() const;
+    int maximumTouchScroll() const;
 
     void startGridReveal();
     bool isFavorite(const std::string& id) const;
@@ -105,9 +110,11 @@ private:
     void synchronizeCatalog();
     ApiResult fetchPage(const std::string& genreSlug, int page, const std::string& query);
     void loadCurrentFiltersFirstPage();
+    void sortSearchPage(std::vector<Game>& games) const;
     void restoreSimilarSourceDetails();
     void loadSimilarGames(const Game& game);
     void loadNextPage();
+    void finishNextPageLoad();
     void loadSearchFirstPage();
     void clearSearchAndReturn();
     void startScreenshotLoad(const Game& game);
@@ -192,6 +199,17 @@ private:
     std::atomic<bool> initialSyncDone_{false};
     ApiResult pendingInitialSync_{};
     bool initialSyncRunning_ = false;
+    std::thread nextPageThread_;
+    std::atomic<bool> nextPageDone_{false};
+    ApiResult pendingNextPage_{};
+    bool nextPageLoading_ = false;
+    int pendingNextPageNumber_ = 0;
+    std::string pendingNextPageGenre_;
+    std::string pendingNextPageQuery_;
+    std::string pendingNextPageOrdering_;
+    std::string pendingNextPageStatus_;
+    std::string pendingNextPageDiscovery_;
+    int pendingNextPageMinRating_ = 0;
     bool screenshotLoading_ = false;
     bool screenshotQueued_ = false;
     bool pendingDetailLoaded_ = false;
@@ -206,6 +224,14 @@ private:
     std::string inFlightCoverId_;
     std::string visibleCoverSignature_;
     bool stopCoverWorker_ = false;
+    bool quitRequested_ = false;
+    bool touchMode_ = false;
+    bool touchPreviewActive_ = false;
+    bool touchDragTracking_ = false;
+    bool touchDragMoved_ = false;
+    int touchDragOriginY_ = 0;
+    int touchDragStartScroll_ = 0;
+    int touchScrollY_ = 0;
 };
 
 }  // namespace vitrine

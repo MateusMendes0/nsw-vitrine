@@ -21,6 +21,7 @@ public:
                 int selected, int previousSelected,
                 Uint32 selectionAnimationStart, Uint32 gridRevealStart,
                 bool classicView, bool backlogTab, bool favoritesTab,
+                bool showSummary, bool touchBrowse, int touchScrollY,
                 const std::function<bool(const std::string&)>& isFavorite,
                 const std::function<BacklogStatus(const std::string&)>& getBacklogStatus);
 

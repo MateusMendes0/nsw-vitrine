@@ -1,8 +1,17 @@
 #include "app.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace vitrine {
+
+namespace {
+
+bool contains(int x, int y, int left, int top, int width, int height) {
+    return x >= left && x < left + width && y >= top && y < top + height;
+}
+
+}  // namespace
 
 App::App(bool networkReady)
     : favoriteCatalog_(std::vector<Game>{}),
@@ -46,6 +55,7 @@ App::~App() {
     if (coverWorker_.joinable()) coverWorker_.join();
     if (screenshotThread_.joinable()) screenshotThread_.join();
     if (initialSyncThread_.joinable()) initialSyncThread_.join();
+    if (nextPageThread_.joinable()) nextPageThread_.join();
 }
 
 void App::releaseRendererResources() {
@@ -78,6 +88,366 @@ int App::visibleGameCount() const {
     return gridColumns() * gridRows();
 }
 
+int App::touchGridStride() const {
+    if (!classicView_) return 372;
+    return (!backlogTab_ && !favoritesTab_) ? 236 : 244;
+}
+
+int App::maximumTouchScroll() const {
+    if (games_.empty()) return 0;
+    const int columns = gridColumns();
+    const int rowCount = (static_cast<int>(games_.size()) + columns - 1) / columns;
+    const int gridY = (!backlogTab_ && !favoritesTab_) ? 190 : 160;
+    const int cardHeight = classicView_ ? 216 : 316;
+    const int contentHeight = (rowCount - 1) * touchGridStride() + cardHeight;
+    return std::max(0, contentHeight - (652 - gridY));
+}
+
+void App::updateTouchDrag(const Input& touch) {
+    if (details_ || screenshotFullscreen_ || filterPanel_ || backlogPanel_ || about_ || detailClosing_) {
+        touchDragTracking_ = false;
+        touchDragMoved_ = false;
+        return;
+    }
+
+    const int gridY = (!backlogTab_ && !favoritesTab_) ? 190 : 160;
+    if (touch.touchBegan) {
+        touchDragTracking_ = touch.touchY >= gridY && touch.touchY < 648;
+        touchDragMoved_ = false;
+        touchDragOriginY_ = touch.touchY;
+        touchDragStartScroll_ = touchPreviewActive_
+            ? (selected_ / gridColumns()) * touchGridStride()
+            : touchScrollY_;
+    }
+    if (!touchDragTracking_) return;
+
+    const int deltaX = touch.touchX - touch.touchStartX;
+    const int deltaY = touch.touchY - touchDragOriginY_;
+    if (!touchDragMoved_ && std::abs(deltaY) > 10 && std::abs(deltaY) > std::abs(deltaX)) {
+        touchDragMoved_ = true;
+        touchPreviewActive_ = false;
+        visibleCoverSignature_.clear();
+    }
+    if (touchDragMoved_) {
+        touchScrollY_ = std::max(0, std::min(maximumTouchScroll(), touchDragStartScroll_ - deltaY));
+        queueVisibleCovers();
+    }
+}
+
+bool App::handleTouch(const Input& touch, Input& mappedInput) {
+    const int x = touch.touchX;
+    const int y = touch.touchY;
+    const TouchGestureDirection gesture = touchGestureDirection(touch);
+
+    if (touchDragTracking_) {
+        touchDragTracking_ = false;
+        if (touchDragMoved_) {
+            touchDragMoved_ = false;
+            const bool reachedEnd = touchScrollY_ >= maximumTouchScroll() - 4;
+            if (reachedEnd && !backlogTab_ && !favoritesTab_ && usingApi_ && hasMore_) {
+                loadNextPage();
+                visibleCoverSignature_.clear();
+                queueVisibleCovers();
+            }
+            return true;
+        }
+    }
+
+    if (about_) {
+        Input action;
+        if (aboutConfirmClear_) {
+            if (contains(x, y, 330, 430, 300, 66)) action.accept = true;
+            else action.back = true;
+            handleAbout(action);
+            return true;
+        }
+        if (contains(x, y, 174, 390, 932, 120)) {
+            aboutOption_ = std::min(2, std::max(0, (x - 178) / 308));
+            action.accept = true;
+        } else if (!contains(x, y, 130, 48, 1020, 624) || contains(x, y, 960, 604, 160, 58)) {
+            action.back = true;
+        }
+        handleAbout(action);
+        return true;
+    }
+
+    if (backlogPanel_) {
+        Input action;
+        for (int option = 0; option < 5; ++option) {
+            if (contains(x, y, 344, 246 + option * 62, 592, 64)) {
+                backlogOption_ = option;
+                action.accept = true;
+                break;
+            }
+        }
+        if (!action.accept && (!contains(x, y, 320, 112, 640, 496) ||
+                               contains(x, y, 730, 548, 210, 54))) {
+            action.back = true;
+        }
+        handleBacklogPanel(action);
+        return true;
+    }
+
+    if (screenshotFullscreen_) {
+        if (gesture == TouchGestureDirection::Left) mappedInput.right = true;
+        else if (gesture == TouchGestureDirection::Right) mappedInput.left = true;
+        else if (x < 300) mappedInput.left = true;
+        else if (x >= kWidth - 300) mappedInput.right = true;
+        else mappedInput.back = true;
+        return false;
+    }
+
+    if (filterPanel_) {
+        Input action;
+        const int tabCount = backlogTab_ ? 4 : 3;
+        const int tabWidth = backlogTab_ ? 247 : 334;
+        for (int tab = 0; tab < tabCount; ++tab) {
+            if (contains(x, y, 122 + tab * (tabWidth + 16), 158, tabWidth, 64)) {
+                filterSection_ = tab;
+                filterOption_ = currentFilterOption();
+                return true;
+            }
+        }
+
+        const int count = filterOptionCount();
+        const int columns = filterColumns();
+        const int gap = 16;
+        const int optionWidth = (1036 - gap * (columns - 1)) / columns;
+        const int optionHeight = filterSection_ == 0 ? 52 : 72;
+        const int startY = filterSection_ == 0 ? 232 : 282;
+        const int rowGap = filterSection_ == 0 ? 10 : 16;
+        for (int option = 0; option < count; ++option) {
+            const int optionX = 122 + (option % columns) * (optionWidth + gap);
+            const int optionY = startY + (option / columns) * (optionHeight + rowGap);
+            if (contains(x, y, optionX - 6, optionY - 6, optionWidth + 12, optionHeight + 12)) {
+                filterOption_ = option;
+                action.accept = true;
+                handleFilterPanel(action);
+                touchPreviewActive_ = false;
+                touchScrollY_ = 0;
+                return true;
+            }
+        }
+        if (!contains(x, y, 82, 60, 1116, 600) || contains(x, y, 1060, 594, 130, 58)) {
+            action.back = true;
+            handleFilterPanel(action);
+        }
+        return true;
+    }
+
+    if (details_) {
+        if (gesture == TouchGestureDirection::Left) {
+            mappedInput.right = true;
+            return false;
+        }
+        if (gesture == TouchGestureDirection::Right) {
+            mappedInput.left = true;
+            return false;
+        }
+        if (!detailScreenshots_.empty() && contains(x, y, 34, 326, 184, 64)) {
+            mappedInput.accept = true;
+            return false;
+        }
+        if (contains(x, y, 218, 326, 232, 64)) {
+            mappedInput.backlog = true;
+            return false;
+        }
+        if (contains(x, y, 450, 326, 224, 64)) {
+            mappedInput.favorite = true;
+            return false;
+        }
+        if (contains(x, y, 674, 326, 226, 64)) {
+            mappedInput.search = true;
+            return false;
+        }
+        const std::size_t thumbnailCount = std::min<std::size_t>(6, detailScreenshots_.size());
+        for (std::size_t index = 0; index < thumbnailCount; ++index) {
+            if (contains(x, y, 36 + static_cast<int>(index) * 200, 440, 200, 130)) {
+                screenshotIndex_ = static_cast<int>(index);
+                screenshotFullscreen_ = true;
+                return true;
+            }
+        }
+        if (contains(x, y, 20, 648, 150, 72)) {
+            mappedInput.back = true;
+            return false;
+        }
+        return true;
+    }
+
+    if (gesture != TouchGestureDirection::None) {
+        mappedInput.left = gesture == TouchGestureDirection::Right;
+        mappedInput.right = gesture == TouchGestureDirection::Left;
+        mappedInput.up = gesture == TouchGestureDirection::Down;
+        mappedInput.down = gesture == TouchGestureDirection::Up;
+        return false;
+    }
+
+    if (contains(x, y, 692, 16, 408, 64)) {
+        touchPreviewActive_ = false;
+        touchScrollY_ = 0;
+        mappedInput.search = true;
+        return false;
+    }
+    if (contains(x, y, 28, 16, 310, 64)) {
+        openAbout();
+        return true;
+    }
+    if (contains(x, y, 1100, 16, 146, 64)) {
+        openFilterPanel(0);
+        return true;
+    }
+
+    static const int tabX[] = {42, 148, 286};
+    static const int tabWidths[] = {98, 130, 112};
+    for (int tab = 0; tab < 3; ++tab) {
+        if (contains(x, y, tabX[tab], 96, tabWidths[tab], 56)) {
+            const int current = backlogTab_ ? 1 : (favoritesTab_ ? 2 : 0);
+            if (tab != current) switchMainTab(tab - current);
+            return true;
+        }
+    }
+    if (contains(x, y, 490, 96, 232, 56)) {
+        openFilterPanel(0);
+        return true;
+    }
+    if (contains(x, y, 718, 96, 232, 56)) {
+        openFilterPanel(backlogTab_ ? 3 : 1);
+        return true;
+    }
+    if (contains(x, y, 946, 96, 298, 56)) {
+        openFilterPanel(2);
+        return true;
+    }
+
+    if (!backlogTab_ && !favoritesTab_) {
+        if (!similarReturnStack_.empty()) {
+            if (contains(x, y, 1000, 145, 250, 48)) {
+                restoreSimilarSourceDetails();
+                return true;
+            }
+        } else {
+            static const int widths[] = {76, 112, 132, 158, 82, 164};
+            int chipX = 150;
+            for (int index = 0; index < 6; ++index) {
+                if (contains(x, y, chipX - 4, 147, widths[index] + 8, 42)) {
+                    discoveryCursor_ = index;
+                    touchPreviewActive_ = false;
+                    touchScrollY_ = 0;
+                    applyDiscoverySection(index);
+                    return true;
+                }
+                chipX += widths[index] + 8;
+            }
+        }
+    }
+
+    if (y >= 648) {
+        if (x >= 1110) {
+            quitRequested_ = true;
+            return true;
+        }
+        if (!similarReturnStack_.empty()) {
+            if (x < 205) restoreSimilarSourceDetails();
+            else if (x < 335 && !games_.empty()) openSelectedDetails();
+            else if (x >= 420 && x < 560) {
+                classicView_ = !classicView_;
+                visibleCoverSignature_.clear();
+                queueVisibleCovers();
+            } else if (x >= 540 && x < 720 && !games_.empty()) {
+                openBacklogPanel(*games_[selected_], false);
+            } else if (x >= 700 && x < 850 && !games_.empty()) {
+                toggleFavorite(*games_[selected_]);
+            }
+            return true;
+        }
+        if (!filter_.query.empty()) {
+            if (x < 190) clearSearchAndReturn();
+            else if (x < 315 && !games_.empty()) openSelectedDetails();
+            else if (x < 455) openSearch();
+            else if (x < 575) openFilterPanel(0);
+            else if (x < 700) {
+                classicView_ = !classicView_;
+                visibleCoverSignature_.clear();
+                queueVisibleCovers();
+            }
+            return true;
+        }
+        if (x < 160 && !games_.empty()) {
+            openSelectedDetails();
+        } else if ((backlogTab_ || favoritesTab_) && x < 285) {
+            const int current = backlogTab_ ? 1 : 2;
+            switchMainTab(-current);
+        } else if ((!backlogTab_ && !favoritesTab_ && x >= 260 && x < 385) ||
+                   ((backlogTab_ || favoritesTab_) && x >= 380 && x < 510)) {
+            openFilterPanel(0);
+        } else if ((!backlogTab_ && !favoritesTab_ && x >= 380 && x < 495) ||
+                   ((backlogTab_ || favoritesTab_) && x >= 500 && x < 620)) {
+            openSearch();
+        } else if (!backlogTab_ && !favoritesTab_ && x >= 490 && x < 635) {
+            surpriseMe();
+        } else if ((!backlogTab_ && !favoritesTab_ && x >= 625 && x < 745) ||
+                   ((backlogTab_ || favoritesTab_) && x >= 610 && x < 735)) {
+            classicView_ = !classicView_;
+            visibleCoverSignature_.clear();
+            queueVisibleCovers();
+        } else if ((!backlogTab_ && !favoritesTab_ && x >= 735 && x < 850) ||
+                   ((backlogTab_ || favoritesTab_) && x >= 715 && x < 835)) {
+            openAbout();
+        }
+        return true;
+    }
+
+    if (games_.empty()) return true;
+
+    if (!classicView_ && touchPreviewActive_ && contains(x, y, 240, 580, 840, 65)) {
+        if (x < 380) openSelectedDetails();
+        else if (x < 550) openBacklogPanel(*games_[selected_], false);
+        else if (x < 790) toggleFavorite(*games_[selected_]);
+        return true;
+    }
+    const int columns = gridColumns();
+    const bool touchBrowse = touchMode_ && !touchPreviewActive_;
+    const int rows = touchBrowse ? 3 : gridRows();
+    const int selectedRow = selected_ / columns;
+    const int firstRow = touchBrowse ? touchScrollY_ / touchGridStride() :
+                         std::max(0, selectedRow - (rows - 1));
+    const int firstIndex = firstRow * columns;
+    const bool discoveryVisible = !backlogTab_ && !favoritesTab_;
+    const int gridY = discoveryVisible ? 190 : 160;
+    const int rowStride = discoveryVisible ? 236 : 244;
+    const int scrollRemainder = touchBrowse ? touchScrollY_ % touchGridStride() : 0;
+    for (int slot = 0; slot < columns * rows; ++slot) {
+        const int index = firstIndex + slot;
+        if (index >= static_cast<int>(games_.size())) break;
+        const int column = slot % columns;
+        const int row = slot / columns;
+        const int cardX = 42 + column * (classicView_ ? 307 : 244);
+        const int cardY = gridY - scrollRemainder + row * (classicView_ ? rowStride : 372);
+        const int cardWidth = classicView_ ? 277 : 226;
+        const int cardHeight = classicView_ ? 216 : 316;
+        if (contains(x, y, cardX - 8, cardY - 8, cardWidth + 16, cardHeight + 16)) {
+            const bool openDetails = touchPreviewActive_ && index == selected_;
+            if (index != selected_) {
+                previousSelected_ = selected_;
+                selected_ = index;
+                selectionAnimationStart_ = SDL_GetTicks();
+                queueVisibleCovers();
+            }
+            if (openDetails) {
+                openSelectedDetails();
+            } else {
+                touchPreviewActive_ = true;
+                touchScrollY_ = (selected_ / columns) * touchGridStride();
+                visibleCoverSignature_.clear();
+                queueVisibleCovers();
+            }
+            return true;
+        }
+    }
+    return true;
+}
+
 void App::startGridReveal() {
     gridRevealStart_ = SDL_GetTicks();
 }
@@ -92,6 +462,8 @@ void App::switchMainTab(int direction) {
     backlogTab_ = current == 1;
     favoritesTab_ = current == 2;
     discoveryFocus_ = false;
+    touchPreviewActive_ = false;
+    touchScrollY_ = 0;
     selected_ = 0;
     previousSelected_ = -1;
     refresh();
@@ -119,9 +491,9 @@ void App::handleAbout(const Input& input) {
             return;
         }
         if (!input.accept) return;
-        if (initialSyncRunning_) {
+        if (initialSyncRunning_ || nextPageLoading_) {
             aboutConfirmClear_ = false;
-            aboutMessage_ = "Aguarde a atualizacao inicial terminar";
+            aboutMessage_ = "Aguarde a atualizacao em andamento terminar";
             return;
         }
         std::string error;
@@ -361,10 +733,12 @@ void App::handleFilterPanel(const Input& input) {
 void App::queueVisibleCovers() {
     if (games_.empty()) return;
     const int columns = gridColumns();
-    const int rows = gridRows();
-    const int visibleCount = visibleGameCount();
+    const bool touchBrowse = touchMode_ && !touchPreviewActive_;
+    const int rows = touchBrowse ? 3 : gridRows();
+    const int visibleCount = columns * rows;
     const int selectedRow = selected_ / columns;
-    const int firstRow = std::max(0, selectedRow - (rows - 1));
+    const int firstRow = touchBrowse ? touchScrollY_ / touchGridStride() :
+                         std::max(0, selectedRow - (rows - 1));
     const int firstIndex = firstRow * columns;
     std::vector<Game> visible;
     std::string signature = classicView_ ? "classic;" : "covers;";
@@ -671,8 +1045,8 @@ void App::finishInitialSync() {
 }
 
 void App::synchronizeCatalog() {
-    if (initialSyncRunning_) {
-        status_ = "Atualizacao automatica em andamento";
+    if (initialSyncRunning_ || nextPageLoading_) {
+        status_ = "Atualizacao em andamento";
         return;
     }
     if (!networkReady_ || !apiInitialized_) {
@@ -685,7 +1059,9 @@ void App::synchronizeCatalog() {
                                              activeMinRating(), "", activeDiscoverySlug());
     status_ = result.message;
     if (!result.success) return;
-    catalog_.replace(result.games);
+    std::vector<Game> synchronizedGames = result.games;
+    sortSearchPage(synchronizedGames);
+    catalog_.replace(std::move(synchronizedGames));
     usingApi_ = true;
     selected_ = 0;
     currentPage_ = 1;
@@ -711,6 +1087,18 @@ ApiResult App::fetchPage(const std::string& genreSlug, int page, const std::stri
     return result;
 }
 
+void App::sortSearchPage(std::vector<Game>& games) const {
+    if (filter_.query.empty() || games.size() < 2) return;
+
+    Catalog pageCatalog(std::move(games));
+    CatalogFilter sortFilter;
+    sortFilter.sort = filter_.sort;
+    const std::vector<const Game*> ordered = pageCatalog.filtered(sortFilter);
+    games.clear();
+    games.reserve(ordered.size());
+    for (const Game* game : ordered) games.push_back(*game);
+}
+
 void App::loadCurrentFiltersFirstPage() {
     if (!usingApi_) {
         refresh();
@@ -723,7 +1111,9 @@ void App::loadCurrentFiltersFirstPage() {
         refresh();
         return;
     }
-    catalog_.replace(result.games);
+    std::vector<Game> filteredGames = result.games;
+    sortSearchPage(filteredGames);
+    catalog_.replace(std::move(filteredGames));
     selected_ = 0;
     currentPage_ = 1;
     hasMore_ = result.hasMore;
@@ -842,27 +1232,80 @@ void App::loadSimilarGames(const Game& game) {
 }
 
 void App::loadNextPage() {
-    if (!usingApi_ || !hasMore_) return;
-    const int nextPage = currentPage_ + 1;
-    const ApiResult result = fetchPage(activeGenreSlug(), nextPage, filter_.query);
-    if (!result.success) {
-        status_ = result.message.empty() ? "Nao foi possivel carregar a proxima pagina" : result.message;
+    if (!usingApi_ || !hasMore_ || nextPageLoading_ || initialSyncRunning_) return;
+    if (nextPageThread_.joinable()) nextPageThread_.join();
+
+    pendingNextPageNumber_ = currentPage_ + 1;
+    pendingNextPageGenre_ = activeGenreSlug();
+    pendingNextPageQuery_ = filter_.query;
+    pendingNextPageOrdering_ = activeOrderingSlug();
+    pendingNextPageStatus_ = activeStatusParam();
+    pendingNextPageMinRating_ = activeMinRating();
+    pendingNextPageDiscovery_ = activeDiscoverySlug();
+    pendingNextPage_ = ApiResult{};
+    nextPageLoading_ = true;
+    nextPageDone_.store(false, std::memory_order_release);
+    status_ = "Carregando mais jogos...";
+
+    const int page = pendingNextPageNumber_;
+    const std::string genre = pendingNextPageGenre_;
+    const std::string query = pendingNextPageQuery_;
+    const std::string ordering = pendingNextPageOrdering_;
+    const std::string pageStatus = pendingNextPageStatus_;
+    const int minRating = pendingNextPageMinRating_;
+    const std::string discovery = pendingNextPageDiscovery_;
+    nextPageThread_ = std::thread([this, page, genre, query, ordering, pageStatus, minRating, discovery]() {
+        ApiResult result;
+        if (networkReady_ && apiInitialized_) {
+            result = api_.synchronize(genre, page, query, ordering, pageStatus, minRating, "", discovery);
+        }
+        if (!result.success) {
+            const ApiResult cached = api_.loadCache(
+                genre, page, query, ordering, pageStatus, minRating, "", discovery);
+            if (cached.success) result = cached;
+        }
+        pendingNextPage_ = std::move(result);
+        nextPageDone_.store(true, std::memory_order_release);
+    });
+}
+
+void App::finishNextPageLoad() {
+    if (!nextPageLoading_ || !nextPageDone_.load(std::memory_order_acquire)) return;
+    if (nextPageThread_.joinable()) nextPageThread_.join();
+    nextPageLoading_ = false;
+
+    const bool sameCatalog = !favoritesTab_ && !backlogTab_ &&
+        currentPage_ + 1 == pendingNextPageNumber_ &&
+        activeGenreSlug() == pendingNextPageGenre_ &&
+        filter_.query == pendingNextPageQuery_ &&
+        activeOrderingSlug() == pendingNextPageOrdering_ &&
+        activeStatusParam() == pendingNextPageStatus_ &&
+        activeMinRating() == pendingNextPageMinRating_ &&
+        activeDiscoverySlug() == pendingNextPageDiscovery_;
+    if (!sameCatalog) return;
+    if (!pendingNextPage_.success) {
+        status_ = pendingNextPage_.message.empty()
+            ? "Nao foi possivel carregar a proxima pagina"
+            : pendingNextPage_.message;
         return;
     }
 
+    sortSearchPage(pendingNextPage_.games);
     std::vector<Game> combined = catalog_.all();
-    for (const Game& incoming : result.games) {
+    for (const Game& incoming : pendingNextPage_.games) {
         const bool duplicate = std::any_of(combined.begin(), combined.end(), [&incoming](const Game& existing) {
             return existing.id == incoming.id;
         });
         if (!duplicate) combined.push_back(incoming);
     }
     catalog_.replace(std::move(combined));
-    currentPage_ = nextPage;
-    hasMore_ = result.hasMore;
+    currentPage_ = pendingNextPageNumber_;
+    hasMore_ = pendingNextPage_.hasMore;
     status_ = "Pagina " + std::to_string(currentPage_) + " carregada • " +
               std::to_string(catalog_.all().size()) + " jogos";
     refresh();
+    visibleCoverSignature_.clear();
+    queueVisibleCovers();
 }
 
 void App::loadSearchFirstPage() {
@@ -881,7 +1324,9 @@ void App::loadSearchFirstPage() {
         return;
     }
 
-    catalog_.replace(result.games);
+    std::vector<Game> searchGames = result.games;
+    sortSearchPage(searchGames);
+    catalog_.replace(std::move(searchGames));
     usingApi_ = true;
     selected_ = 0;
     currentPage_ = 1;
@@ -1014,7 +1459,11 @@ void App::refresh() {
     filter_.genre = genreIndex_ == 0 ? "" : genres_[genreIndex_];
     const Catalog& source = backlogTab_ ? backlogCatalog_ :
                             (favoritesTab_ ? favoriteCatalog_ : catalog_);
-    games_ = source.filtered(filter_);
+    CatalogFilter appliedFilter = filter_;
+    if (!favoritesTab_ && !backlogTab_ && usingApi_) {
+        appliedFilter.preserveSourceOrder = true;
+    }
+    games_ = source.filtered(appliedFilter);
     if (backlogTab_ && backlogFilterIndex_ > 0) {
         const auto expected = static_cast<BacklogStatus>(backlogFilterIndex_);
         games_.erase(std::remove_if(games_.begin(), games_.end(), [expected](const Game* game) {
@@ -1022,6 +1471,7 @@ void App::refresh() {
         }), games_.end());
     }
     selected_ = std::max(0, std::min(selected_, static_cast<int>(games_.size()) - 1));
+    touchScrollY_ = std::max(0, std::min(touchScrollY_, maximumTouchScroll()));
 }
 
 const char* App::backlogFilterLabel() const {
@@ -1077,87 +1527,104 @@ void App::openSearch() {
 
 void App::handle(const Input& input) {
     finishInitialSync();
+    finishNextPageLoad();
     finishScreenshotLoad();
+    Input resolvedInput = input;
+    const bool controllerInput = input.up || input.down || input.left || input.right ||
+        input.accept || input.back || input.search || input.sort || input.previousGenre ||
+        input.nextGenre || input.viewMode || input.favorite || input.backlog ||
+        input.surprise || input.sync;
+    if (controllerInput && !input.touchActive && !input.touchReleased) {
+        touchMode_ = false;
+        touchPreviewActive_ = false;
+        touchDragTracking_ = false;
+    }
+    if (input.touchBegan || input.touchActive || input.touchReleased) {
+        touchMode_ = true;
+        updateTouchDrag(input);
+    }
+    if (input.touchReleased && handleTouch(input, resolvedInput)) return;
+    const Input& currentInput = resolvedInput;
     if (about_) {
-        handleAbout(input);
+        handleAbout(currentInput);
         return;
     }
     if (backlogPanel_) {
-        handleBacklogPanel(input);
+        handleBacklogPanel(currentInput);
         return;
     }
     if (detailClosing_) return;
     if (screenshotFullscreen_) {
         if (!detailScreenshots_.empty()) {
-            if (input.left) {
+            if (currentInput.left) {
                 screenshotIndex_ = (screenshotIndex_ - 1 + static_cast<int>(detailScreenshots_.size())) %
                                    static_cast<int>(detailScreenshots_.size());
             }
-            if (input.right) {
+            if (currentInput.right) {
                 screenshotIndex_ = (screenshotIndex_ + 1) % static_cast<int>(detailScreenshots_.size());
             }
         }
-        if (input.back || input.accept) screenshotFullscreen_ = false;
+        if (currentInput.back || currentInput.accept) screenshotFullscreen_ = false;
         return;
     }
     if (filterPanel_) {
-        handleFilterPanel(input);
+        handleFilterPanel(currentInput);
         return;
     }
     if (details_) {
         if (!detailScreenshots_.empty()) {
-            if (input.left) {
+            if (currentInput.left) {
                 screenshotIndex_ = (screenshotIndex_ - 1 + static_cast<int>(detailScreenshots_.size())) %
                                    static_cast<int>(detailScreenshots_.size());
             }
-            if (input.right) {
+            if (currentInput.right) {
                 screenshotIndex_ = (screenshotIndex_ + 1) % static_cast<int>(detailScreenshots_.size());
             }
         }
-        if (input.favorite) toggleFavorite(detailGame_);
-        if (input.backlog) {
+        if (currentInput.favorite) toggleFavorite(detailGame_);
+        if (currentInput.backlog) {
             openBacklogPanel(detailGame_, true);
             return;
         }
-        if (input.search) {
+        if (currentInput.search) {
             loadSimilarGames(detailGame_);
             return;
         }
-        if (input.back) {
+        if (currentInput.back) {
             details_ = false;
             detailClosing_ = true;
             detailTransitionStart_ = SDL_GetTicks();
         }
-        if (input.accept && !detailScreenshots_.empty()) screenshotFullscreen_ = true;
+        if (currentInput.accept && !detailScreenshots_.empty()) screenshotFullscreen_ = true;
         return;
     }
-    if (input.sync) {
+    if (currentInput.sync) {
         openAbout();
         return;
     }
     if (discoveryFocus_) {
-        handleDiscoveryRibbon(input);
+        handleDiscoveryRibbon(currentInput);
         return;
     }
-    if (input.sort) {
+    if (currentInput.sort) {
         openFilterPanel(0);
         return;
     }
-    if (input.previousGenre) {
+    if (currentInput.previousGenre) {
         switchMainTab(-1);
         return;
     }
-    if (input.nextGenre) {
+    if (currentInput.nextGenre) {
         switchMainTab(1);
         return;
     }
-    if (input.viewMode) {
+    if (currentInput.viewMode) {
         classicView_ = !classicView_;
         visibleCoverSignature_.clear();
         queueVisibleCovers();
         return;
     }
-    if (input.back) {
+    if (currentInput.back) {
         if (!similarReturnStack_.empty()) {
             restoreSimilarSourceDetails();
             return;
@@ -1183,38 +1650,38 @@ void App::handle(const Input& input) {
         }
         return;
     }
-    if (input.search) openSearch();
-    if (input.surprise) {
+    if (currentInput.search) openSearch();
+    if (currentInput.surprise) {
         surpriseMe();
         return;
     }
-    if (input.backlog && !games_.empty()) {
+    if (currentInput.backlog && !games_.empty()) {
         openBacklogPanel(*games_[selected_], false);
         return;
     }
-    if (input.favorite && !games_.empty()) {
+    if (currentInput.favorite && !games_.empty()) {
         toggleFavorite(*games_[selected_]);
         return;
     }
     const int columns = gridColumns();
-    if (input.up && similarReturnStack_.empty() && !favoritesTab_ && !backlogTab_ &&
+    if (currentInput.up && similarReturnStack_.empty() && !favoritesTab_ && !backlogTab_ &&
         (games_.empty() || selected_ < columns)) {
         discoveryFocus_ = true;
         discoveryCursor_ = discoveryIndex_;
         status_ = "Escolha uma secao de descoberta";
         return;
     }
-    if (input.down && !favoritesTab_ && !backlogTab_ && usingApi_ && hasMore_ &&
+    if (currentInput.down && !favoritesTab_ && !backlogTab_ && usingApi_ && hasMore_ &&
         (games_.empty() || selected_ + columns >= static_cast<int>(games_.size()))) {
         loadNextPage();
     }
     if (games_.empty()) return;
 
     int next = selected_;
-    if (input.left && selected_ % columns > 0) --next;
-    if (input.right && selected_ % columns < columns - 1 && selected_ + 1 < static_cast<int>(games_.size())) ++next;
-    if (input.up && selected_ >= columns) next -= columns;
-    if (input.down && selected_ + columns < static_cast<int>(games_.size())) next += columns;
+    if (currentInput.left && selected_ % columns > 0) --next;
+    if (currentInput.right && selected_ % columns < columns - 1 && selected_ + 1 < static_cast<int>(games_.size())) ++next;
+    if (currentInput.up && selected_ >= columns) next -= columns;
+    if (currentInput.down && selected_ + columns < static_cast<int>(games_.size())) next += columns;
     next = std::max(0, std::min(next, static_cast<int>(games_.size()) - 1));
     if (next != selected_) {
         previousSelected_ = selected_;
@@ -1222,7 +1689,7 @@ void App::handle(const Input& input) {
         selectionAnimationStart_ = SDL_GetTicks();
     }
     queueVisibleCovers();
-    if (input.accept) openSelectedDetails();
+    if (currentInput.accept) openSelectedDetails();
 }
 
 void App::render(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer& images) {
@@ -1238,12 +1705,18 @@ void App::render(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer& imag
         !similarReturnStack_.empty(),
         similarReturnStack_.empty() ? "" : similarReturnStack_.back().detailGame.title,
         discoveryIndex_, discoveryFocus_, discoveryCursor_);
+
+    const int gridTop = (!backlogTab_ && !favoritesTab_) ? 190 : 160;
+    const SDL_Rect gridClip{0, gridTop, kWidth, 652 - gridTop};
+    SDL_RenderSetClipRect(renderer, &gridClip);
     gridView_.render(
         renderer, text, images, games_, selected_, previousSelected_,
         selectionAnimationStart_, gridRevealStart_, classicView_,
-        backlogTab_, favoritesTab_,
+        backlogTab_, favoritesTab_, !touchMode_ || touchPreviewActive_,
+        touchMode_ && !touchPreviewActive_, touchScrollY_,
         [this](const std::string& id) { return isFavorite(id); },
         [this](const std::string& id) { return backlogStatus(id); });
+    SDL_RenderSetClipRect(renderer, nullptr);
     layoutView_.renderFooter(
         renderer, text, !similarReturnStack_.empty(), filter_.query,
         discoveryFocus_, discoveryIndex_, backlogTab_, favoritesTab_, status_);
