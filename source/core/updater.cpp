@@ -524,12 +524,26 @@ UpdateInstallResult AppUpdater::install(const UpdateInfo& info,
         return result;
     }
 
+#ifdef __SWITCH__
+    // O romfsInit() mantem o NRO aberto em leitura para o RomFS embutido.
+    // O Horizon FS retorna TargetLocked (FS 0xE02) se tentarmos gravar nele enquanto aberto.
+    // Desmontamos o RomFS aqui para liberar o lock do arquivo no Switch.
+    romfsExit();
+#endif
+
+    const auto restoreRomfsOnFailure = [&]() {
+#ifdef __SWITCH__
+        romfsInit();
+#endif
+    };
+
     // Some homebrew launchers keep the active NRO in a state where Horizon FS
     // refuses to rename it. Sphaira's own updater avoids that operation: copy
     // the running NRO to a recovery file, then copy the validated update over it.
     FileFingerprint backupFingerprint;
     if (!copyFileVerified(executablePath_, backupPath, backupFingerprint, fileError) ||
         !validNro(backupPath, backupFingerprint.size) || !commitSdCard()) {
+        restoreRomfsOnFailure();
         std::remove(temporaryPath.c_str());
         if (fileError.empty()) fileError = "O Switch nao confirmou o backup no cartao SD";
         result.message = "Nao foi possivel criar um backup seguro. " + fileError;
@@ -553,6 +567,7 @@ UpdateInstallResult AppUpdater::install(const UpdateInfo& info,
                            validNro(executablePath_, installedFingerprint.size);
     if (!installed) {
         const bool restored = restoreBackup();
+        restoreRomfsOnFailure();
         std::remove(temporaryPath.c_str());
         result.message = restored ? "Falha ao trocar o NRO; a versao anterior foi restaurada" :
                                     "Falha ao trocar o NRO; restaure o arquivo .bak pelo Sphaira";
@@ -561,6 +576,7 @@ UpdateInstallResult AppUpdater::install(const UpdateInfo& info,
     }
     if (!commitSdCard()) {
         const bool restored = restoreBackup();
+        restoreRomfsOnFailure();
         std::remove(temporaryPath.c_str());
         result.message = restored ? "Falha ao confirmar o update; a versao anterior foi restaurada" :
                                     "Falha ao confirmar o update; restaure o arquivo .bak pelo Sphaira";
