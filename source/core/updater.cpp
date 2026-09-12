@@ -8,11 +8,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 #ifdef __SWITCH__
 #include <switch.h>
@@ -188,6 +191,152 @@ bool validNro(const std::string& path, std::uint64_t actualSize) {
         (static_cast<std::uint32_t>(header[0x1a]) << 16u) |
         (static_cast<std::uint32_t>(header[0x1b]) << 24u);
     return declaredSize >= 0x80u && declaredSize <= actualSize;
+}
+
+struct FileFingerprint {
+    std::uint64_t size = 0;
+    std::string sha256;
+};
+
+std::string fileOperationError(const char* action, int errorNumber) {
+#ifdef __SWITCH__
+    const Result nativeResult = fsdevGetLastResult();
+#endif
+    std::ostringstream message;
+    message << action;
+    if (errorNumber != 0) message << ": " << std::strerror(errorNumber);
+#ifdef __SWITCH__
+    if (R_FAILED(nativeResult)) {
+        message << " (FS 0x" << std::hex << std::uppercase << R_VALUE(nativeResult) << ')';
+    }
+#endif
+    return message.str();
+}
+
+bool removeFileIfPresent(const std::string& path, std::string& error) {
+    errno = 0;
+    if (std::remove(path.c_str()) == 0) return true;
+    const int savedErrno = errno;
+    if (savedErrno == ENOENT) return true;
+    error = fileOperationError("Falha ao remover arquivo antigo", savedErrno);
+    return false;
+}
+
+bool fingerprintFile(const std::string& path, FileFingerprint& fingerprint, std::string& error) {
+    errno = 0;
+    std::FILE* file = std::fopen(path.c_str(), "rb");
+    if (!file) {
+        error = fileOperationError("Falha ao abrir arquivo para verificacao", errno);
+        return false;
+    }
+
+    std::vector<std::uint8_t> buffer(128u * 1024u);
+    Sha256 hash;
+    std::uint64_t total = 0;
+    bool succeeded = true;
+    while (true) {
+        const std::size_t bytes = std::fread(buffer.data(), 1, buffer.size(), file);
+        if (bytes > 0) {
+            if (total + bytes > kMaximumNroSize) {
+                error = "Arquivo excede o limite seguro de tamanho";
+                succeeded = false;
+                break;
+            }
+            hash.update(buffer.data(), bytes);
+            total += bytes;
+        }
+        if (bytes < buffer.size()) {
+            if (std::ferror(file)) {
+                error = fileOperationError("Falha ao ler arquivo para verificacao", errno);
+                succeeded = false;
+            }
+            break;
+        }
+    }
+    if (std::fclose(file) != 0 && succeeded) {
+        error = fileOperationError("Falha ao fechar arquivo verificado", errno);
+        succeeded = false;
+    }
+    if (!succeeded) return false;
+
+    fingerprint.size = total;
+    fingerprint.sha256 = hash.finishHex();
+    return true;
+}
+
+bool copyFileVerified(const std::string& sourcePath,
+                      const std::string& destinationPath,
+                      FileFingerprint& fingerprint,
+                      std::string& error) {
+    errno = 0;
+    std::FILE* source = std::fopen(sourcePath.c_str(), "rb");
+    if (!source) {
+        error = fileOperationError("Falha ao abrir arquivo de origem", errno);
+        return false;
+    }
+    errno = 0;
+    std::FILE* destination = std::fopen(destinationPath.c_str(), "wb");
+    if (!destination) {
+        const int savedErrno = errno;
+        std::fclose(source);
+        error = fileOperationError("Falha ao abrir arquivo de destino", savedErrno);
+        return false;
+    }
+
+    std::vector<std::uint8_t> buffer(128u * 1024u);
+    Sha256 sourceHash;
+    std::uint64_t total = 0;
+    bool succeeded = true;
+    while (true) {
+        const std::size_t bytes = std::fread(buffer.data(), 1, buffer.size(), source);
+        if (bytes > 0) {
+            if (total + bytes > kMaximumNroSize) {
+                error = "Arquivo de origem excede o limite seguro de tamanho";
+                succeeded = false;
+                break;
+            }
+            const std::size_t written = std::fwrite(buffer.data(), 1, bytes, destination);
+            if (written != bytes) {
+                error = fileOperationError("Falha ao gravar copia no SD", errno);
+                succeeded = false;
+                break;
+            }
+            sourceHash.update(buffer.data(), bytes);
+            total += bytes;
+        }
+        if (bytes < buffer.size()) {
+            if (std::ferror(source)) {
+                error = fileOperationError("Falha ao ler arquivo de origem", errno);
+                succeeded = false;
+            }
+            break;
+        }
+    }
+
+    if (std::fclose(source) != 0 && succeeded) {
+        error = fileOperationError("Falha ao fechar arquivo de origem", errno);
+        succeeded = false;
+    }
+    if (std::fclose(destination) != 0 && succeeded) {
+        error = fileOperationError("Falha ao concluir copia no SD", errno);
+        succeeded = false;
+    }
+    if (!succeeded) {
+        std::remove(destinationPath.c_str());
+        return false;
+    }
+
+    fingerprint.size = total;
+    fingerprint.sha256 = sourceHash.finishHex();
+    FileFingerprint writtenFingerprint;
+    if (!fingerprintFile(destinationPath, writtenFingerprint, error) ||
+        writtenFingerprint.size != fingerprint.size ||
+        writtenFingerprint.sha256 != fingerprint.sha256) {
+        if (error.empty()) error = "A copia gravada no SD nao confere com a origem";
+        std::remove(destinationPath.c_str());
+        return false;
+    }
+    return true;
 }
 
 bool commitSdCard() {
@@ -368,28 +517,58 @@ UpdateInstallResult AppUpdater::install(const UpdateInfo& info,
         return result;
     }
 
-    std::remove(backupPath.c_str());
-    if (std::rename(executablePath_.c_str(), backupPath.c_str()) != 0) {
+    std::string fileError;
+    if (!removeFileIfPresent(backupPath, fileError)) {
         std::remove(temporaryPath.c_str());
-        result.message = "Nao foi possivel criar o backup do NRO atual";
+        result.message = fileError;
         return result;
     }
-    if (std::rename(temporaryPath.c_str(), executablePath_.c_str()) != 0) {
-        const bool restored = std::rename(backupPath.c_str(), executablePath_.c_str()) == 0;
-        commitSdCard();
+
+    // Some homebrew launchers keep the active NRO in a state where Horizon FS
+    // refuses to rename it. Sphaira's own updater avoids that operation: copy
+    // the running NRO to a recovery file, then copy the validated update over it.
+    FileFingerprint backupFingerprint;
+    if (!copyFileVerified(executablePath_, backupPath, backupFingerprint, fileError) ||
+        !validNro(backupPath, backupFingerprint.size) || !commitSdCard()) {
+        std::remove(temporaryPath.c_str());
+        if (fileError.empty()) fileError = "O Switch nao confirmou o backup no cartao SD";
+        result.message = "Nao foi possivel criar um backup seguro. " + fileError;
+        return result;
+    }
+
+    const auto restoreBackup = [&]() {
+        FileFingerprint restoredFingerprint;
+        std::string restoreError;
+        const bool copied = copyFileVerified(backupPath, executablePath_, restoredFingerprint, restoreError);
+        const bool matches = copied && restoredFingerprint.size == backupFingerprint.size &&
+                             restoredFingerprint.sha256 == backupFingerprint.sha256;
+        return matches && commitSdCard();
+    };
+
+    FileFingerprint installedFingerprint;
+    fileError.clear();
+    const bool installed = copyFileVerified(temporaryPath, executablePath_, installedFingerprint, fileError) &&
+                           installedFingerprint.size == info.size &&
+                           installedFingerprint.sha256 == info.sha256 &&
+                           validNro(executablePath_, installedFingerprint.size);
+    if (!installed) {
+        const bool restored = restoreBackup();
         std::remove(temporaryPath.c_str());
         result.message = restored ? "Falha ao trocar o NRO; a versao anterior foi restaurada" :
                                     "Falha ao trocar o NRO; restaure o arquivo .bak pelo Sphaira";
+        if (!fileError.empty()) result.message += ". " + fileError;
         return result;
     }
     if (!commitSdCard()) {
-        std::remove(executablePath_.c_str());
-        const bool restored = std::rename(backupPath.c_str(), executablePath_.c_str()) == 0;
-        commitSdCard();
+        const bool restored = restoreBackup();
+        std::remove(temporaryPath.c_str());
         result.message = restored ? "Falha ao confirmar o update; a versao anterior foi restaurada" :
                                     "Falha ao confirmar o update; restaure o arquivo .bak pelo Sphaira";
         return result;
     }
+
+    std::remove(temporaryPath.c_str());
+    commitSdCard();
 
     result.success = true;
     result.message = "Atualizacao instalada. Volte ao Sphaira e abra o Vitrine novamente.";
