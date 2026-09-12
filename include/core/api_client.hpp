@@ -26,13 +26,15 @@ public:
                         const std::string& ordering = "-metacritic",
                         const std::string& status = "", int minRating = 0,
                         const std::string& themeSlug = "",
-                        const std::string& discoverySlug = "") const;
+                        const std::string& discoverySlug = "",
+                        const std::string& gameModeSlug = "") const;
     ApiResult synchronize(const std::string& genreSlug = "", int page = 1,
                           const std::string& query = "",
                           const std::string& ordering = "-metacritic",
                           const std::string& status = "", int minRating = 0,
                           const std::string& themeSlug = "",
-                          const std::string& discoverySlug = "") const;
+                          const std::string& discoverySlug = "",
+                          const std::string& gameModeSlug = "") const;
     bool ensureCover(const Game& game, std::string& error) const;
     bool ensurePortraitCover(const Game& game, std::string& error) const;
     bool fetchDetails(const Game& game, Game& enriched, std::string& error) const;
@@ -60,7 +62,8 @@ private:
                           const std::string& ordering = "-metacritic",
                           const std::string& status = "", int minRating = 0,
                           const std::string& themeSlug = "",
-                          const std::string& discoverySlug = "") const;
+                          const std::string& discoverySlug = "",
+                          const std::string& gameModeSlug = "") const;
     bool initialized_ = false;
     std::string basePath_;
 };

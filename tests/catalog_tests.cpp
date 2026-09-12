@@ -53,6 +53,43 @@ int main() {
     games = catalog.filtered(filter);
     assert(games.front()->id == catalog.all().front().id);
 
+    filter.preserveSourceOrder = false;
+    filter.gameMode = vitrine::GameModeFilter::SinglePlayer;
+    games = catalog.filtered(filter);
+    assert(!games.empty());
+    for (const auto* g : games) {
+        bool hasSingle = false;
+        for (const auto& m : g->gameModes) {
+            if (m.find("Single") != std::string::npos) hasSingle = true;
+        }
+        assert(hasSingle);
+    }
+
+    filter.gameMode = vitrine::GameModeFilter::CoOp;
+    games = catalog.filtered(filter);
+    assert(!games.empty());
+
+    filter.gameMode = vitrine::GameModeFilter::Multiplayer;
+    games = catalog.filtered(filter);
+    assert(games.size() == 1);
+    assert(games.front()->id == "neon-apex");
+
+    filter.gameMode = vitrine::GameModeFilter::All;
+
+    assert(std::string(vitrine::gameModeFilterLabel(vitrine::GameModeFilter::All)) == "Todos");
+    assert(std::string(vitrine::gameModeFilterLabel(vitrine::GameModeFilter::SinglePlayer)) == "Single-player");
+    assert(std::string(vitrine::gameModeFilterLabel(vitrine::GameModeFilter::CoOp)) == "Co-op Local / 2 Jogadores");
+    assert(std::string(vitrine::gameModeFilterLabel(vitrine::GameModeFilter::Multiplayer)) == "Multiplayer Online");
+
+    assert(vitrine::formatExpectedRelease("2026-10-15", 2026) == "15/Out");
+    assert(vitrine::formatExpectedRelease("2026-11-00", 2026) == "Nov 2026");
+    assert(vitrine::formatExpectedRelease("2026-11", 2026) == "Nov 2026");
+    assert(vitrine::formatExpectedRelease("Oct 15, 2026", 2026) == "15/Out");
+    assert(vitrine::formatExpectedRelease("November 2026", 2026) == "Nov 2026");
+    assert(vitrine::formatExpectedRelease("Q1 2027", 2027) == "Q1 2027");
+    assert(vitrine::formatExpectedRelease("", 2027) == "2027");
+    assert(vitrine::formatExpectedRelease("", 0) == "--");
+
     assert(std::string(vitrine::sortModeLabel(vitrine::SortMode::Popular)) == "Mais populares");
     assert(std::string(vitrine::sortModeLabel(vitrine::SortMode::Release)) == "Lancamento");
     assert(std::string(vitrine::backlogStatusLabel(vitrine::BacklogStatus::WantToPlay)) == "Quero jogar");

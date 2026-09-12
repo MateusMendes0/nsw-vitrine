@@ -15,7 +15,7 @@ bool containsNormalized(const std::string& value, const std::string& needle) {
 std::vector<Game> demoGames() {
     // Dados ficticios: permitem experimentar a interface sem redistribuir capas
     // ou apresentar scores externos como se fossem dados oficiais.
-    return {
+    std::vector<Game> games = {
         {"astral-trails", "Astral Trails", "Uma jornada alem das nuvens",
          "Explore ilhas flutuantes, restaure constelacoes e encontre atalhos em um mundo compacto feito para ser descoberto no seu ritmo.",
          "Northstar Studio", {"Aventura", "Indie"}, GameType::Game, 2025, 91.0f, 14.5f, 31.0f,
@@ -57,6 +57,22 @@ std::vector<Game> demoGames() {
          "Copper Finch", {"RPG", "Acao"}, GameType::Dlc, 2026, 89.0f, 8.0f, 15.0f,
          {193, 63, 42}, {62, 23, 74}},
     };
+    if (games.size() >= 10) {
+        games[0].gameModes = {"Single player"};
+        games[1].gameModes = {"Single player"};
+        games[2].gameModes = {"Single player", "Co-operative"};
+        games[2].releaseDate = "2026-10-15";
+        games[3].gameModes = {"Single player", "Co-operative"};
+        games[4].gameModes = {"Multiplayer", "Split screen", "Co-operative"};
+        games[5].gameModes = {"Single player"};
+        games[6].gameModes = {"Single player"};
+        games[7].gameModes = {"Single player"};
+        games[7].releaseDate = "2026-11-20";
+        games[8].gameModes = {"Single player"};
+        games[9].gameModes = {"Single player", "Co-operative"};
+        games[9].releaseDate = "2026-12-05";
+    }
+    return games;
 }
 
 }  // namespace
@@ -101,6 +117,87 @@ SortMode nextSortMode(SortMode mode) {
         case SortMode::Release: return SortMode::Score;
     }
     return SortMode::Score;
+}
+
+const char* gameModeFilterLabel(GameModeFilter mode) {
+    switch (mode) {
+        case GameModeFilter::All: return "Todos";
+        case GameModeFilter::SinglePlayer: return "Single-player";
+        case GameModeFilter::CoOp: return "Co-op Local / 2 Jogadores";
+        case GameModeFilter::Multiplayer: return "Multiplayer Online";
+    }
+    return "Todos";
+}
+
+std::string formatExpectedRelease(const std::string& releaseDate, int releaseYear) {
+    if (releaseDate.empty() || releaseDate == "----") {
+        return releaseYear > 0 ? std::to_string(releaseYear) : "--";
+    }
+
+    static const char* ptMonths[] = {
+        "", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+        "Jul", "Ago", "Set", "Out", "Nov", "Dez"
+    };
+
+    if (releaseDate.size() >= 7 && releaseDate[4] == '-') {
+        const int year = std::atoi(releaseDate.substr(0, 4).c_str());
+        const int month = std::atoi(releaseDate.substr(5, 2).c_str());
+        int day = 0;
+        if (releaseDate.size() >= 10 && releaseDate[7] == '-') {
+            day = std::atoi(releaseDate.substr(8, 2).c_str());
+        }
+        if (month >= 1 && month <= 12) {
+            if (day > 0) {
+                return std::to_string(day) + "/" + ptMonths[month];
+            }
+            return std::string(ptMonths[month]) + " " + std::to_string(year > 0 ? year : releaseYear);
+        }
+    }
+
+    if (releaseDate.find("Q1") != std::string::npos ||
+        releaseDate.find("Q2") != std::string::npos ||
+        releaseDate.find("Q3") != std::string::npos ||
+        releaseDate.find("Q4") != std::string::npos) {
+        return releaseDate;
+    }
+
+    static const char* enMonths[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    for (int m = 0; m < 12; ++m) {
+        const auto pos = releaseDate.find(enMonths[m]);
+        if (pos != std::string::npos) {
+            int day = 0;
+            std::size_t i = pos + 3;
+            while (i < releaseDate.size() && (releaseDate[i] == ' ' || releaseDate[i] == '.')) ++i;
+            if (i < releaseDate.size() && std::isdigit(static_cast<unsigned char>(releaseDate[i]))) {
+                day = std::atoi(releaseDate.c_str() + i);
+            }
+            if (day > 0 && day <= 31) {
+                return std::to_string(day) + "/" + ptMonths[m + 1];
+            }
+            int year = releaseYear;
+            for (std::size_t yIdx = 0; yIdx + 3 < releaseDate.size(); ++yIdx) {
+                if (std::isdigit(static_cast<unsigned char>(releaseDate[yIdx])) &&
+                    std::isdigit(static_cast<unsigned char>(releaseDate[yIdx + 1])) &&
+                    std::isdigit(static_cast<unsigned char>(releaseDate[yIdx + 2])) &&
+                    std::isdigit(static_cast<unsigned char>(releaseDate[yIdx + 3]))) {
+                    year = std::atoi(releaseDate.substr(yIdx, 4).c_str());
+                    break;
+                }
+            }
+            if (year > 0) {
+                return std::string(ptMonths[m + 1]) + " " + std::to_string(year);
+            }
+            return ptMonths[m + 1];
+        }
+    }
+
+    if (releaseYear > 0) {
+        return std::to_string(releaseYear);
+    }
+    return releaseDate;
 }
 
 std::string normalizeForSearch(const std::string& value) {
@@ -158,6 +255,36 @@ std::vector<const Game*> Catalog::filtered(const CatalogFilter& filter) const {
         }
         if (filter.upcomingOnly && game.releaseYear <= 2025) {
             continue;
+        }
+        if (filter.gameMode != GameModeFilter::All) {
+            bool matches = false;
+            for (const std::string& mode : game.gameModes) {
+                const std::string normalized = normalizeForSearch(mode);
+                if (filter.gameMode == GameModeFilter::SinglePlayer) {
+                    if (normalized.find("single") != std::string::npos) {
+                        matches = true;
+                        break;
+                    }
+                } else if (filter.gameMode == GameModeFilter::CoOp) {
+                    if (normalized.find("co-op") != std::string::npos ||
+                        normalized.find("coop") != std::string::npos ||
+                        normalized.find("co-operative") != std::string::npos ||
+                        normalized.find("cooperative") != std::string::npos ||
+                        normalized.find("split") != std::string::npos) {
+                        matches = true;
+                        break;
+                    }
+                } else if (filter.gameMode == GameModeFilter::Multiplayer) {
+                    if (normalized.find("multiplayer") != std::string::npos ||
+                        normalized.find("online") != std::string::npos ||
+                        normalized.find("battle royale") != std::string::npos ||
+                        normalized.find("mmo") != std::string::npos) {
+                        matches = true;
+                        break;
+                    }
+                }
+            }
+            if (!matches) continue;
         }
         if (!query.empty()) {
             bool match = containsNormalized(game.title, query) ||

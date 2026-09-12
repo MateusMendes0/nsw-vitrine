@@ -445,15 +445,17 @@ std::string CatalogApiClient::cachePath(const std::string& genreSlug, int page,
                                         const std::string& status,
                                         int minRating,
                                         const std::string& themeSlug,
-                                        const std::string& discoverySlug) const {
+                                        const std::string& discoverySlug,
+                                        const std::string& gameModeSlug) const {
     const std::string genre = genreSlug.empty() ? "all" : genreSlug;
     const std::string theme = themeSlug.empty() ? "all" : themeSlug;
+    const std::string mode = gameModeSlug.empty() ? "all" : gameModeSlug;
     const std::string search = query.empty() ? "all" : "search-" + queryCacheKey(query);
     const std::string order = ordering.empty() ? "metacritic" : ordering;
     const std::string st = status.empty() ? "all" : status;
     const std::string min = minRating > 0 ? std::to_string(minRating) : "0";
     const std::string discovery = discoverySlug.empty() ? "all" : discoverySlug;
-    return basePath_ + "cache/catalog-igdb-v7-" + discovery + "-" + genre + "-" + theme + "-" + search + "-" +
+    return basePath_ + "cache/catalog-igdb-v7-" + discovery + "-" + genre + "-" + theme + "-" + mode + "-" + search + "-" +
            order + "-" + st + "-" + min + "-" + std::to_string(std::max(1, page)) + ".json";
 }
 
@@ -463,9 +465,10 @@ ApiResult CatalogApiClient::loadCache(const std::string& genreSlug, int page,
                                       const std::string& status,
                                       int minRating,
                                       const std::string& themeSlug,
-                                      const std::string& discoverySlug) const {
+                                      const std::string& discoverySlug,
+                                      const std::string& gameModeSlug) const {
     const std::string payload = readFile(cachePath(genreSlug, page, query, ordering, status, minRating,
-                                                   themeSlug, discoverySlug));
+                                                   themeSlug, discoverySlug, gameModeSlug));
     if (payload.empty()) return {false, "Sem cache da API", {}};
     return parseCatalog(payload, "Pagina offline carregada");
 }
@@ -476,7 +479,8 @@ ApiResult CatalogApiClient::synchronize(const std::string& genreSlug, int page,
                                         const std::string& status,
                                         int minRating,
                                         const std::string& themeSlug,
-                                        const std::string& discoverySlug) const {
+                                        const std::string& discoverySlug,
+                                        const std::string& gameModeSlug) const {
     if (!initialized_) return {false, "Rede nao inicializada", {}};
     std::string url = std::string(kApiBaseUrl) +
                       (discoverySlug.empty() ? "/v1/games" : "/v1/discovery/" + discoverySlug) +
@@ -487,6 +491,7 @@ ApiResult CatalogApiClient::synchronize(const std::string& genreSlug, int page,
     if (!themeSlug.empty()) url += "&themes=" + themeSlug;
     if (!status.empty()) url += "&status=" + status;
     if (minRating > 0) url += "&min_rating=" + std::to_string(minRating);
+    if (!gameModeSlug.empty()) url += "&game_mode=" + gameModeSlug;
     if (!query.empty()) url += "&search=" + urlEncode(query.substr(0, 80));
 
     std::string payload;
@@ -496,7 +501,7 @@ ApiResult CatalogApiClient::synchronize(const std::string& genreSlug, int page,
     ApiResult result = parseCatalog(payload, "Pagina IGDB carregada");
     if (!result.success) return result;
     if (!writeFile(cachePath(genreSlug, page, query, ordering, status, minRating,
-                             themeSlug, discoverySlug), payload)) {
+                             themeSlug, discoverySlug, gameModeSlug), payload)) {
         result.message = "Atualizado, mas nao foi possivel salvar o cache";
     }
     return result;
@@ -751,6 +756,7 @@ ApiResult CatalogApiClient::parseCatalog(const std::string& payload, const std::
         if (game.studio.empty()) game.studio = "Desenvolvedora nao informada";
         game.type = GameType::Game;
         const std::string released = jsonString(item, "released");
+        game.releaseDate = released;
         game.releaseYear = released.size() >= 4 ? std::atoi(released.substr(0, 4).c_str()) : 0;
         game.score = static_cast<float>(jsonInteger(item, "metacritic"));
         if (game.score <= 0.0f) game.score = static_cast<float>(jsonNumber(item, "rating") * 20.0);
@@ -779,6 +785,16 @@ ApiResult CatalogApiClient::parseCatalog(const std::string& payload, const std::
             }
         }
         if (game.genres.empty()) game.genres.push_back("Outros");
+
+        json_t* modes = json_object_get(item, "game_modes");
+        if (json_is_array(modes)) {
+            const std::size_t modeCount = json_array_size(modes);
+            for (std::size_t modeIndex = 0; modeIndex < modeCount; ++modeIndex) {
+                json_t* mode = json_array_get(modes, modeIndex);
+                const std::string name = jsonString(mode, "name");
+                if (!name.empty()) game.gameModes.push_back(name);
+            }
+        }
         if (game.tagline.empty()) {
             game.tagline = game.genres.front();
             if (game.studio != "Desenvolvedora nao informada") game.tagline += " da " + game.studio;

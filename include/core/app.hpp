@@ -37,6 +37,7 @@ struct SimilarReturnPoint {
     std::string detailGameId;
     int genreIndex = 0;
     int highlightIndex = 0;
+    int gameModeIndex = 0;
     int backlogFilterIndex = 0;
     int discoveryIndex = 0;
     int discoveryCursor = 0;
@@ -111,6 +112,7 @@ private:
     void applyDiscoverySection(int nextIndex);
     void handleDiscoveryRibbon(const Input& input);
     std::string activeStatusParam() const;
+    std::string activeGameModeSlug() const;
     int activeMinRating() const;
     const char* highlightFilterLabel() const;
     void startInitialSync();
@@ -148,6 +150,7 @@ private:
     std::vector<const Game*> games_;
     int genreIndex_ = 0;
     int highlightIndex_ = 0;
+    int gameModeIndex_ = 0;
     int backlogFilterIndex_ = 0;
     int discoveryIndex_ = 0;
     int discoveryCursor_ = 0;
@@ -187,6 +190,7 @@ private:
     CatalogFilter discoveryReturnFilter_{};
     int discoveryReturnGenreIndex_ = 0;
     int discoveryReturnHighlightIndex_ = 0;
+    int discoveryReturnGameModeIndex_ = 0;
     int discoveryReturnSelected_ = 0;
     int discoveryReturnPage_ = 1;
     bool discoveryReturnHasMore_ = false;
@@ -218,6 +222,7 @@ private:
     std::string pendingNextPageOrdering_;
     std::string pendingNextPageStatus_;
     std::string pendingNextPageDiscovery_;
+    std::string pendingNextPageGameMode_;
     int pendingNextPageMinRating_ = 0;
     std::thread updateCheckThread_;
     std::atomic<bool> updateCheckDone_{false};

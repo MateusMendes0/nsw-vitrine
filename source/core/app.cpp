@@ -205,8 +205,8 @@ bool App::handleTouch(const Input& touch, Input& mappedInput) {
 
     if (filterPanel_) {
         Input action;
-        const int tabCount = backlogTab_ ? 4 : 3;
-        const int tabWidth = backlogTab_ ? 247 : 334;
+        const int tabCount = backlogTab_ ? 5 : 4;
+        const int tabWidth = backlogTab_ ? 194 : 247;
         for (int tab = 0; tab < tabCount; ++tab) {
             if (contains(x, y, 122 + tab * (tabWidth + 16), 158, tabWidth, 64)) {
                 filterSection_ = tab;
@@ -788,33 +788,39 @@ void App::toggleFavorite(const Game& game) {
 int App::currentFilterOption() const {
     if (filterSection_ == 0) return genreIndex_;
     if (filterSection_ == 1) return highlightIndex_;
-    if (filterSection_ == 3) return backlogFilterIndex_;
-    return static_cast<int>(filter_.sort);
+    if (filterSection_ == 2) return gameModeIndex_;
+    if (filterSection_ == 3) return static_cast<int>(filter_.sort);
+    if (filterSection_ == 4) return backlogFilterIndex_;
+    return 0;
 }
 
 int App::filterOptionCount() const {
     if (filterSection_ == 0) return static_cast<int>(genres_.size());
     if (filterSection_ == 1) return 3;
+    if (filterSection_ == 2) return 4;
     if (filterSection_ == 3) return 5;
+    if (filterSection_ == 4) return 5;
     return 5;
 }
 
 int App::filterColumns() const {
     if (filterSection_ == 0) return 4;
     if (filterSection_ == 1) return 3;
-    if (filterSection_ == 3) return 5;
+    if (filterSection_ == 2) return 2;
+    if (filterSection_ == 3) return 3;
+    if (filterSection_ == 4) return 5;
     return 3;
 }
 
 void App::openFilterPanel(int section) {
-    const int lastSection = backlogTab_ ? 3 : 2;
+    const int lastSection = backlogTab_ ? 4 : 3;
     filterSection_ = std::max(0, std::min(section, lastSection));
     filterOption_ = currentFilterOption();
     filterPanel_ = true;
 }
 
 void App::switchFilterSection(int direction) {
-    const int sectionCount = backlogTab_ ? 4 : 3;
+    const int sectionCount = backlogTab_ ? 5 : 4;
     filterSection_ = (filterSection_ + direction + sectionCount) % sectionCount;
     filterOption_ = currentFilterOption();
 }
@@ -849,6 +855,12 @@ void App::handleFilterPanel(const Input& input) {
             if (favoritesTab_ || backlogTab_) refresh(); else loadCurrentFiltersFirstPage();
         }
     } else if (filterSection_ == 2) {
+        if (gameModeIndex_ != filterOption_) {
+            gameModeIndex_ = filterOption_;
+            filter_.gameMode = static_cast<GameModeFilter>(gameModeIndex_);
+            if (favoritesTab_ || backlogTab_) refresh(); else loadCurrentFiltersFirstPage();
+        }
+    } else if (filterSection_ == 3) {
         if (static_cast<int>(filter_.sort) != filterOption_) {
             filter_.sort = static_cast<SortMode>(filterOption_);
             updateDiscoverySourceOrdering();
@@ -1030,6 +1042,7 @@ void App::captureDiscoveryReturnPoint() {
     discoveryReturnFilter_ = filter_;
     discoveryReturnGenreIndex_ = genreIndex_;
     discoveryReturnHighlightIndex_ = highlightIndex_;
+    discoveryReturnGameModeIndex_ = gameModeIndex_;
     discoveryReturnSelected_ = selected_;
     discoveryReturnPage_ = currentPage_;
     discoveryReturnHasMore_ = hasMore_;
@@ -1045,6 +1058,7 @@ void App::restoreDiscoveryReturnPoint() {
         filter_ = discoveryReturnFilter_;
         genreIndex_ = discoveryReturnGenreIndex_;
         highlightIndex_ = discoveryReturnHighlightIndex_;
+        gameModeIndex_ = discoveryReturnGameModeIndex_;
         selected_ = discoveryReturnSelected_;
         currentPage_ = discoveryReturnPage_;
         hasMore_ = discoveryReturnHasMore_;
@@ -1126,6 +1140,15 @@ std::string App::activeStatusParam() const {
     return "";
 }
 
+std::string App::activeGameModeSlug() const {
+    switch (filter_.gameMode) {
+        case GameModeFilter::SinglePlayer: return "single-player";
+        case GameModeFilter::CoOp: return "co-op";
+        case GameModeFilter::Multiplayer: return "multiplayer";
+        case GameModeFilter::All: default: return "";
+    }
+}
+
 int App::activeMinRating() const {
     if (highlightIndex_ == 1) return 80;
     return 0;
@@ -1153,8 +1176,8 @@ void App::finishInitialSync() {
     initialSyncRunning_ = false;
 
     const bool initialViewStillActive = !favoritesTab_ && !backlogTab_ && currentPage_ == 1 &&
-        filter_.query.empty() && genreIndex_ == 0 && highlightIndex_ == 0 && discoveryIndex_ == 0 &&
-        filter_.sort == SortMode::Score;
+        filter_.query.empty() && genreIndex_ == 0 && highlightIndex_ == 0 && gameModeIndex_ == 0 &&
+        discoveryIndex_ == 0 && filter_.sort == SortMode::Score;
     if (!pendingInitialSync_.success || !initialViewStillActive) {
         if (!pendingInitialSync_.success && !usingApi_) {
             status_ = pendingInitialSync_.message.empty()
@@ -1188,7 +1211,8 @@ void App::synchronizeCatalog() {
     status_ = "Atualizando catalogo...";
     const ApiResult result = api_.synchronize(activeGenreSlug(), 1, filter_.query,
                                              activeOrderingSlug(), activeStatusParam(),
-                                             activeMinRating(), "", activeDiscoverySlug());
+                                             activeMinRating(), "", activeDiscoverySlug(),
+                                             activeGameModeSlug());
     status_ = result.message;
     if (!result.success) return;
     std::vector<Game> synchronizedGames = result.games;
@@ -1207,13 +1231,14 @@ ApiResult App::fetchPage(const std::string& genreSlug, int page, const std::stri
     const std::string ordering = activeOrderingSlug();
     const std::string status = activeStatusParam();
     const int minRating = activeMinRating();
+    const std::string gameMode = activeGameModeSlug();
     if (networkReady_ && apiInitialized_) {
         result = api_.synchronize(genreSlug, page, query, ordering, status, minRating,
-                                  "", activeDiscoverySlug());
+                                  "", activeDiscoverySlug(), gameMode);
     }
     if (!result.success) {
         const ApiResult cached = api_.loadCache(genreSlug, page, query, ordering, status, minRating,
-                                                 "", activeDiscoverySlug());
+                                                 "", activeDiscoverySlug(), gameMode);
         if (cached.success) return cached;
     }
     return result;
@@ -1276,6 +1301,7 @@ void App::restoreSimilarSourceDetails() {
     filter_ = returnPoint.filter;
     genreIndex_ = returnPoint.genreIndex;
     highlightIndex_ = returnPoint.highlightIndex;
+    gameModeIndex_ = returnPoint.gameModeIndex;
     backlogFilterIndex_ = returnPoint.backlogFilterIndex;
     discoveryIndex_ = returnPoint.discoveryIndex;
     discoveryCursor_ = returnPoint.discoveryCursor;
@@ -1324,6 +1350,7 @@ void App::loadSimilarGames(const Game& game) {
     returnPoint.detailGameId = detailGameId_;
     returnPoint.genreIndex = genreIndex_;
     returnPoint.highlightIndex = highlightIndex_;
+    returnPoint.gameModeIndex = gameModeIndex_;
     returnPoint.backlogFilterIndex = backlogFilterIndex_;
     returnPoint.discoveryIndex = discoveryIndex_;
     returnPoint.discoveryCursor = discoveryCursor_;
@@ -1354,6 +1381,7 @@ void App::loadSimilarGames(const Game& game) {
     discoveryFocus_ = false;
     genreIndex_ = 0;
     highlightIndex_ = 0;
+    gameModeIndex_ = 0;
     backlogFilterIndex_ = 0;
     filter_ = CatalogFilter{};
     filter_.preserveSourceOrder = true;
@@ -1374,6 +1402,7 @@ void App::loadNextPage() {
     pendingNextPageStatus_ = activeStatusParam();
     pendingNextPageMinRating_ = activeMinRating();
     pendingNextPageDiscovery_ = activeDiscoverySlug();
+    pendingNextPageGameMode_ = activeGameModeSlug();
     pendingNextPage_ = ApiResult{};
     nextPageLoading_ = true;
     nextPageDone_.store(false, std::memory_order_release);
@@ -1386,14 +1415,15 @@ void App::loadNextPage() {
     const std::string pageStatus = pendingNextPageStatus_;
     const int minRating = pendingNextPageMinRating_;
     const std::string discovery = pendingNextPageDiscovery_;
-    nextPageThread_ = std::thread([this, page, genre, query, ordering, pageStatus, minRating, discovery]() {
+    const std::string gameMode = pendingNextPageGameMode_;
+    nextPageThread_ = std::thread([this, page, genre, query, ordering, pageStatus, minRating, discovery, gameMode]() {
         ApiResult result;
         if (networkReady_ && apiInitialized_) {
-            result = api_.synchronize(genre, page, query, ordering, pageStatus, minRating, "", discovery);
+            result = api_.synchronize(genre, page, query, ordering, pageStatus, minRating, "", discovery, gameMode);
         }
         if (!result.success) {
             const ApiResult cached = api_.loadCache(
-                genre, page, query, ordering, pageStatus, minRating, "", discovery);
+                genre, page, query, ordering, pageStatus, minRating, "", discovery, gameMode);
             if (cached.success) result = cached;
         }
         pendingNextPage_ = std::move(result);
@@ -1409,6 +1439,7 @@ void App::finishNextPageLoad() {
     const bool sameCatalog = !favoritesTab_ && !backlogTab_ &&
         currentPage_ + 1 == pendingNextPageNumber_ &&
         activeGenreSlug() == pendingNextPageGenre_ &&
+        activeGameModeSlug() == pendingNextPageGameMode_ &&
         filter_.query == pendingNextPageQuery_ &&
         activeOrderingSlug() == pendingNextPageOrdering_ &&
         activeStatusParam() == pendingNextPageStatus_ &&
@@ -1614,10 +1645,12 @@ const char* App::backlogFilterLabel() const {
 void App::resetFiltersForSearch() {
     genreIndex_ = 0;
     highlightIndex_ = 0;
+    gameModeIndex_ = 0;
     backlogFilterIndex_ = 0;
     filter_.genre.clear();
     filter_.acclaimedOnly = false;
     filter_.upcomingOnly = false;
+    filter_.gameMode = GameModeFilter::All;
     filter_.sort = SortMode::Score;
     filter_.preserveSourceOrder = false;
     discoveryIndex_ = 0;

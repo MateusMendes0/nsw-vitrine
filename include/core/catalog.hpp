@@ -16,10 +16,18 @@ enum class SortMode {
     Release,
 };
 
+enum class GameModeFilter {
+    All,
+    SinglePlayer,
+    CoOp,
+    Multiplayer,
+};
+
 struct CatalogFilter {
     std::string query;
     std::string genre;
     SortMode sort = SortMode::Score;
+    GameModeFilter gameMode = GameModeFilter::All;
     bool acclaimedOnly = false;
     bool upcomingOnly = false;
     bool preserveSourceOrder = false;
@@ -41,6 +49,8 @@ private:
 
 const char* sortModeLabel(SortMode mode);
 SortMode nextSortMode(SortMode mode);
+const char* gameModeFilterLabel(GameModeFilter mode);
+std::string formatExpectedRelease(const std::string& releaseDate, int releaseYear);
 std::string normalizeForSearch(const std::string& value);
 
 }  // namespace vitrine

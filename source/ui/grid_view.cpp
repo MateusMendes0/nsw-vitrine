@@ -97,12 +97,28 @@ void GridView::drawCoverCard(SDL_Renderer* renderer, TextRenderer& text, ImageRe
 
     const int titleY = coverY + coverHeight + 10;
     text.draw(renderer, game.title, cardX + 10, titleY, 18, color(242, 245, 252), cardWidth - 20);
-    const std::string year = game.releaseYear > 0 ? std::to_string(game.releaseYear) : "----";
-    text.draw(renderer, year, cardX + 10, titleY + 31, 18, color(128, 140, 166));
-    const std::string score = game.score > 0.0f ? scoreText(game.score) : "--";
-    const int scoreWidth = text.width(score, 18);
-    text.draw(renderer, score, cardX + cardWidth - 19 - scoreWidth, titleY + 31, 18,
-              game.score > 0.0f ? color(116, 235, 181) : color(128, 140, 166));
+    if (game.score > 0.0f) {
+        const std::string year = game.releaseYear > 0 ? std::to_string(game.releaseYear) : "----";
+        text.draw(renderer, year, cardX + 10, titleY + 31, 18, color(128, 140, 166));
+        const std::string score = scoreText(game.score);
+        const int scoreWidth = text.width(score, 18);
+        text.draw(renderer, score, cardX + cardWidth - 19 - scoreWidth, titleY + 31, 18, color(116, 235, 181));
+    } else {
+        const std::string expected = formatExpectedRelease(game.releaseDate, game.releaseYear);
+        if (expected != "--") {
+            const bool hasYearInBadge = (game.releaseYear > 0 && expected.find(std::to_string(game.releaseYear)) != std::string::npos);
+            const std::string leftLabel = hasYearInBadge ? "Estreia" :
+                (game.releaseYear > 0 ? std::to_string(game.releaseYear) : "Estreia");
+            text.draw(renderer, leftLabel, cardX + 10, titleY + 31, 18, color(128, 140, 166));
+            const int badgeWidth = text.width(expected, 18);
+            text.draw(renderer, expected, cardX + cardWidth - 19 - badgeWidth, titleY + 31, 18, color(112, 225, 255));
+        } else {
+            const std::string year = game.releaseYear > 0 ? std::to_string(game.releaseYear) : "----";
+            text.draw(renderer, year, cardX + 10, titleY + 31, 18, color(128, 140, 166));
+            const int scoreWidth = text.width("--", 18);
+            text.draw(renderer, "--", cardX + cardWidth - 19 - scoreWidth, titleY + 31, 18, color(128, 140, 166));
+        }
+    }
     if (reveal < 0.999f) {
         fillRoundedRect(renderer, cardX - 10, cardY - 10, cardWidth + 20, cardHeight + 20,
                         21, color(7, 10, 18, static_cast<Uint8>(245.0f * (1.0f - reveal))));
@@ -147,6 +163,13 @@ void GridView::drawCard(SDL_Renderer* renderer, TextRenderer& text, ImageRendere
     if (game.score > 0.0f) {
         fillRoundedRect(renderer, x + 208, y + 154, 55, 28, 9, color(35, 96, 74));
         text.draw(renderer, scoreText(game.score), x + 219, y + 159, 18, color(116, 235, 181));
+    } else {
+        const std::string expected = formatExpectedRelease(game.releaseDate, game.releaseYear);
+        if (expected != "--") {
+            const int badgeWidth = text.width(expected, 18) + 16;
+            fillRoundedRect(renderer, x + 263 - badgeWidth, y + 154, badgeWidth, 28, 9, color(28, 48, 76));
+            text.draw(renderer, expected, x + 263 - badgeWidth + 8, y + 159, 18, color(112, 225, 255));
+        }
     }
     if (game.mainHours > 0.0f) {
         const std::string timePrefix = game.averagePlaytime ? "Tempo medio " : "Historia ";
@@ -202,11 +225,18 @@ void GridView::drawSelectedSummary(SDL_Renderer* renderer, TextRenderer& text, I
                 isFav ? "Remover favorito" : "Favoritar");
 
     fillRoundedRect(renderer, 1080, summaryY + 13, 2, summaryHeight - 26, 1, color(47, 61, 85));
-    text.draw(renderer, "NOTA", 1121, summaryY + 25, 18, color(126, 145, 176));
-    const std::string score = game.score > 0.0f ? scoreText(game.score) : "--";
-    const int scoreWidth = text.width(score, 28);
-    text.draw(renderer, score, 1158 - scoreWidth / 2, summaryY + 54, 28,
-              game.score > 0.0f ? color(116, 235, 181) : color(150, 162, 186));
+    if (game.score > 0.0f) {
+        text.draw(renderer, "NOTA", 1121, summaryY + 25, 18, color(126, 145, 176));
+        const std::string score = scoreText(game.score);
+        const int scoreWidth = text.width(score, 28);
+        text.draw(renderer, score, 1158 - scoreWidth / 2, summaryY + 54, 28, color(116, 235, 181));
+    } else {
+        const std::string expected = formatExpectedRelease(game.releaseDate, game.releaseYear);
+        text.draw(renderer, "ESTREIA", 1107, summaryY + 25, 18, color(126, 145, 176));
+        const int dateWidth = text.width(expected, 20);
+        text.draw(renderer, expected, 1158 - dateWidth / 2, summaryY + 56, 20,
+                  expected == "--" ? color(150, 162, 186) : color(112, 225, 255));
+    }
     if (reveal < 0.999f) {
         fillRoundedRect(renderer, 42, summaryY, 1196, summaryHeight, 15,
                         color(7, 10, 18, static_cast<Uint8>(235.0f * (1.0f - reveal))));

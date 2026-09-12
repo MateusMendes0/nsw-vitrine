@@ -31,12 +31,24 @@ std::string PanelsView::filterOptionLabel(int filterSection, int index,
         static const char* highlights[] = {"Todos", "Aclamados (80+)", "Lancamentos"};
         return highlights[index];
     }
+    if (filterSection == 2) {
+        static const char* modes[] = {
+            "Todos",
+            "Single-player",
+            "Co-op Local / 2 Jogadores",
+            "Multiplayer Online"
+        };
+        return modes[index];
+    }
     if (filterSection == 3) {
+        static const char* sorts[] = {"Maior score", "Mais populares", "A-Z", "Mais curtos", "Lancamento"};
+        return sorts[index];
+    }
+    if (filterSection == 4) {
         static const char* statuses[] = {"Todos", "Quero jogar", "Jogando", "Finalizados", "Abandonados"};
         return statuses[index];
     }
-    static const char* sorts[] = {"Maior score", "Mais populares", "A-Z", "Mais curtos", "Lancamento"};
-    return sorts[index];
+    return "";
 }
 
 void PanelsView::renderFilterPanel(SDL_Renderer* renderer, TextRenderer& text,
@@ -47,10 +59,10 @@ void PanelsView::renderFilterPanel(SDL_Renderer* renderer, TextRenderer& text,
     text.draw(renderer, "Filtros e ordenacao", 122, 89, 28, color(244, 246, 252));
     text.draw(renderer, "Escolha diretamente; a API so atualiza ao aplicar.", 122, 126, 18, color(132, 145, 174));
 
-    static const char* tabs[] = {"Genero", "Destaque", "Ordenar", "Status"};
-    const int tabCount = backlogTab ? 4 : 3;
+    static const char* tabs[] = {"Genero", "Destaque", "Modo", "Ordenar", "Status"};
+    const int tabCount = backlogTab ? 5 : 4;
     for (int tab = 0; tab < tabCount; ++tab) {
-        const int tabWidth = backlogTab ? 247 : 334;
+        const int tabWidth = backlogTab ? 194 : 247;
         const int gap = 16;
         const int x = 122 + tab * (tabWidth + gap);
         const bool active = tab == filterSection;
@@ -68,7 +80,13 @@ void PanelsView::renderFilterPanel(SDL_Renderer* renderer, TextRenderer& text,
     } else if (filterSection == 1) {
         count = 3;
         columns = 3;
+    } else if (filterSection == 2) {
+        count = 4;
+        columns = 2;
     } else if (filterSection == 3) {
+        count = 5;
+        columns = 3;
+    } else if (filterSection == 4) {
         count = 5;
         columns = 5;
     }
