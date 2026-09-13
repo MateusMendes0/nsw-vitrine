@@ -12,6 +12,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
 #endif
