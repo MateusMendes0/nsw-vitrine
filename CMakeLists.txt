@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(vitrine_core
+    source/core/cache_store.cpp
     source/core/catalog.cpp
     source/core/input.cpp
     source/core/update_utils.cpp

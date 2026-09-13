@@ -29,7 +29,8 @@ public:
     void renderAbout(SDL_Renderer* renderer, TextRenderer& text,
                      int aboutOption, bool networkReady, bool apiInitialized,
                      bool initialSyncRunning, bool usingApi,
-                     std::uint64_t aboutCacheBytes, const std::string& aboutMessage,
+                     std::uint64_t aboutCacheBytes, std::uint64_t cacheLimitBytes,
+                     const std::string& aboutMessage,
                      bool aboutConfirmClear, const std::string& updateSubtitle);
 
     void renderUpdateDialog(SDL_Renderer* renderer, TextRenderer& text,

@@ -151,7 +151,8 @@ void PanelsView::renderBacklogPanel(SDL_Renderer* renderer, TextRenderer& text,
 void PanelsView::renderAbout(SDL_Renderer* renderer, TextRenderer& text,
                              int aboutOption, bool networkReady, bool apiInitialized,
                              bool initialSyncRunning, bool usingApi,
-                             std::uint64_t aboutCacheBytes, const std::string& aboutMessage,
+                             std::uint64_t aboutCacheBytes, std::uint64_t cacheLimitBytes,
+                             const std::string& aboutMessage,
                              bool aboutConfirmClear, const std::string& updateSubtitle) {
     fillRect(renderer, 0, 0, kWidth, kHeight, color(3, 6, 13, 224));
     fillRoundedRect(renderer, 130, 48, 1020, 624, 26, color(16, 22, 37));
@@ -181,7 +182,8 @@ void PanelsView::renderAbout(SDL_Renderer* renderer, TextRenderer& text,
               198, 306, 22, color(225, 230, 244), 400);
     fillRoundedRect(renderer, 650, 266, 448, 72, 15, color(23, 30, 48));
     text.draw(renderer, "CACHE LOCAL", 670, 278, 18, color(113, 129, 166));
-    text.draw(renderer, formatCacheSize(aboutCacheBytes), 670, 306, 22, color(225, 230, 244));
+    text.draw(renderer, formatCacheSize(aboutCacheBytes) + " / " + formatCacheSize(cacheLimitBytes),
+              670, 306, 22, color(225, 230, 244));
 
     text.draw(renderer, "ACOES", 178, 365, 18, color(113, 129, 166));
     static const char* titles[] = {"Atualizar dados", "Atualizar app", "Limpar cache", "Fechar"};

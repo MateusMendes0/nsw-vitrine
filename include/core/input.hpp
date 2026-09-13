@@ -42,6 +42,11 @@ enum class TouchGestureDirection {
 
 TouchGestureDirection touchGestureDirection(const Input& input, int minimumDistance = 64);
 
+int selectionForTouchScroll(int touchScrollY, int rowStride, int columns,
+                            int controllerRows, int previousSelection, int itemCount);
+int touchScrollForSelection(int selection, int rowStride, int columns,
+                            int controllerRows, int maximumScroll);
+
 #ifdef __SWITCH__
 Input readSwitchInput(PadState& pad);
 #endif

@@ -42,7 +42,7 @@
 - **Surpreenda-me**: Sorteio aleatório de títulos respeitando os filtros e abas ativas.
 - **Busca Rápida**: Integração nativa com o teclado virtual oficial do Switch.
 - **Modo Touch**: Navegação direta pela tela portátil com arrasto contínuo da grade, toque em abas, filtros, capas, ações e modais. O primeiro toque em uma capa revela o resumo; o segundo abre os detalhes.
-- **Desempenho e Cache Offline**: Sistema de fila de downloads não bloqueante para capas e capturas, com persistência local no cartão SD para carregamento instantâneo.
+- **Desempenho e Cache Offline**: Sistema de fila de downloads não bloqueante para capas e capturas, com persistência local no cartão SD, limite de 100 MiB e remoção automática dos arquivos menos usados.
 - **Atualizações Seguras**: Verificação automática de novas versões no GitHub, confirmação antes de instalar, validação SHA-256 e backup do NRO anterior.
 
 ---

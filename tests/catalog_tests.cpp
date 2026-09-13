@@ -1,8 +1,11 @@
+#include "cache_store.hpp"
 #include "catalog.hpp"
 #include "input.hpp"
 #include "update_utils.hpp"
 
 #include <cassert>
+#include <chrono>
+#include <filesystem>
 #include <iostream>
 
 int main() {
@@ -117,6 +120,44 @@ int main() {
     touch.touchX = 530;
     touch.touchY = 320;
     assert(vitrine::touchGestureDirection(touch) == vitrine::TouchGestureDirection::None);
+
+    // Switching input modes keeps the same first visible grid row. In the
+    // classic two-row layout, controller focus lands on the second visible row.
+    assert(vitrine::selectionForTouchScroll(3 * 244, 244, 4, 2, 1, 40) == 17);
+    assert(vitrine::touchScrollForSelection(17, 244, 4, 2, 2200) == 3 * 244);
+
+    // Cover mode has one controller row and preserves the previous column.
+    assert(vitrine::selectionForTouchScroll(5 * 372 + 120, 372, 5, 1, 3, 40) == 28);
+    assert(vitrine::touchScrollForSelection(28, 372, 5, 1, 2200) == 5 * 372);
+    assert(vitrine::selectionForTouchScroll(5 * 372 + 200, 372, 5, 1, 3, 40) == 33);
+
+    // A partial final row and the physical end of the touch scroll are clamped.
+    assert(vitrine::selectionForTouchScroll(1878, 236, 4, 2, 1, 40) == 37);
+    assert(vitrine::touchScrollForSelection(37, 236, 4, 2, 1878) == 1878);
+
+    namespace fs = std::filesystem;
+    const auto unique = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    const fs::path cacheRoot = fs::temp_directory_path() /
+        ("vitrine-cache-policy-" + std::to_string(unique));
+    fs::create_directories(cacheRoot);
+    const std::string firstPath = (cacheRoot / "first.bin").string();
+    const std::string secondPath = (cacheRoot / "second.bin").string();
+    const std::string newestPath = (cacheRoot / "newest.bin").string();
+    const std::string oversizedPath = (cacheRoot / "oversized.bin").string();
+    vitrine::CacheStore cache(cacheRoot.string(), 100, 70);
+    assert(!cache.write(oversizedPath, std::string(101, 'x')));
+    assert(!cache.contains(oversizedPath));
+    assert(cache.write(firstPath, std::string(35, 'a')));
+    assert(cache.write(secondPath, std::string(35, 'b')));
+    assert(cache.read(firstPath) == std::string(35, 'a'));
+    assert(cache.write(newestPath, std::string(35, 'c')));
+    assert(cache.contains(firstPath));
+    assert(!cache.contains(secondPath));
+    assert(cache.contains(newestPath));
+    assert(cache.sizeBytes() <= 70);
+    assert(cache.clear());
+    assert(cache.sizeBytes() == 0);
+    fs::remove_all(cacheRoot);
     std::cout << "catalog_tests: OK\n";
     return 0;
 }

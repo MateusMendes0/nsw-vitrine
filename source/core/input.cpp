@@ -1,5 +1,6 @@
 #include "input.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 
 namespace vitrine {
@@ -15,6 +16,34 @@ TouchGestureDirection touchGestureDirection(const Input& input, int minimumDista
         return deltaX < 0 ? TouchGestureDirection::Left : TouchGestureDirection::Right;
     }
     return deltaY < 0 ? TouchGestureDirection::Up : TouchGestureDirection::Down;
+}
+
+int selectionForTouchScroll(int touchScrollY, int rowStride, int columns,
+                            int controllerRows, int previousSelection, int itemCount) {
+    if (itemCount <= 0) return 0;
+    rowStride = std::max(1, rowStride);
+    columns = std::max(1, columns);
+    controllerRows = std::max(1, controllerRows);
+
+    const int rowCount = (itemCount + columns - 1) / columns;
+    // Touch can stop between rows, while controller navigation is row-aligned.
+    // Snap to the closest row so the mode change causes the smallest jump.
+    const int alignedTouchRow = (std::max(0, touchScrollY) + rowStride / 2) / rowStride;
+    const int selectedRow = std::min(rowCount - 1, alignedTouchRow + controllerRows - 1);
+    const int previousColumn = std::max(0, previousSelection) % columns;
+    return std::min(itemCount - 1, selectedRow * columns + previousColumn);
+}
+
+int touchScrollForSelection(int selection, int rowStride, int columns,
+                            int controllerRows, int maximumScroll) {
+    rowStride = std::max(1, rowStride);
+    columns = std::max(1, columns);
+    controllerRows = std::max(1, controllerRows);
+    maximumScroll = std::max(0, maximumScroll);
+
+    const int selectedRow = std::max(0, selection) / columns;
+    const int firstVisibleRow = std::max(0, selectedRow - (controllerRows - 1));
+    return std::min(maximumScroll, firstVisibleRow * rowStride);
 }
 
 #ifdef __SWITCH__

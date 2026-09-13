@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cache_store.hpp"
 #include "game.hpp"
 
 #include <cstdint>
@@ -47,6 +48,7 @@ public:
     std::vector<Game> loadBacklog() const;
     bool saveBacklog(const std::vector<Game>& games) const;
     std::uint64_t cacheSizeBytes() const;
+    std::uint64_t cacheLimitBytes() const;
     bool clearCache(std::string& error) const;
 
     const std::string& basePath() const;
@@ -66,6 +68,7 @@ private:
                           const std::string& gameModeSlug = "") const;
     bool initialized_ = false;
     std::string basePath_;
+    CacheStore cache_;
 };
 
 }  // namespace vitrine

@@ -10,14 +10,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <dirent.h>
 #include <fstream>
 #include <sstream>
-#include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
-#else
-#include <unistd.h>
 #endif
 #include <utility>
 
@@ -41,11 +37,6 @@ std::size_t writeToBuffer(char* contents, std::size_t size, std::size_t count, v
     }
     buffer->data.append(contents, bytes);
     return bytes;
-}
-
-bool fileExists(const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
-    return file.good();
 }
 
 std::string readFile(const std::string& path) {
@@ -107,48 +98,6 @@ void createDirectory(const std::string& path) {
     if (result != 0 && errno != EEXIST) {
         // The caller will report a useful file-write error if creation failed.
     }
-}
-
-bool isDotEntry(const char* name) {
-    return std::strcmp(name, ".") == 0 || std::strcmp(name, "..") == 0;
-}
-
-std::uint64_t directorySizeBytes(const std::string& path) {
-    DIR* directory = opendir(path.c_str());
-    if (!directory) return 0;
-    std::uint64_t total = 0;
-    while (dirent* entry = readdir(directory)) {
-        if (isDotEntry(entry->d_name)) continue;
-        const std::string child = path + "/" + entry->d_name;
-        struct stat info{};
-        if (stat(child.c_str(), &info) != 0) continue;
-        if (S_ISDIR(info.st_mode)) total += directorySizeBytes(child);
-        else if (info.st_size > 0) total += static_cast<std::uint64_t>(info.st_size);
-    }
-    closedir(directory);
-    return total;
-}
-
-bool clearDirectoryContents(const std::string& path) {
-    DIR* directory = opendir(path.c_str());
-    if (!directory) return errno == ENOENT;
-    bool success = true;
-    while (dirent* entry = readdir(directory)) {
-        if (isDotEntry(entry->d_name)) continue;
-        const std::string child = path + "/" + entry->d_name;
-        struct stat info{};
-        if (stat(child.c_str(), &info) != 0) {
-            success = false;
-            continue;
-        }
-        if (S_ISDIR(info.st_mode)) {
-            if (!clearDirectoryContents(child) || rmdir(child.c_str()) != 0) success = false;
-        } else if (std::remove(child.c_str()) != 0) {
-            success = false;
-        }
-    }
-    closedir(directory);
-    return success;
 }
 
 std::string jsonString(json_t* object, const char* key) {
@@ -375,9 +324,11 @@ bool saveStoredGames(const std::string& path, const std::vector<Game>& games) {
 
 CatalogApiClient::CatalogApiClient()
 #ifdef __SWITCH__
-    : basePath_("sdmc:/switch/switch-vitrine/")
+    : basePath_("sdmc:/switch/switch-vitrine/"),
+      cache_(basePath_ + "cache")
 #else
-    : basePath_("runtime/")
+    : basePath_("runtime/"),
+      cache_(basePath_ + "cache")
 #endif
 {}
 
@@ -397,6 +348,7 @@ bool CatalogApiClient::initialize() {
     createDirectory(basePath_ + "cache/covers");
     createDirectory(basePath_ + "cache/screenshots");
     createDirectory(basePath_ + "cache/details");
+    cache_.enforceLimit();
     initialized_ = curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK;
     return initialized_;
 }
@@ -422,12 +374,16 @@ bool CatalogApiClient::saveBacklog(const std::vector<Game>& games) const {
 }
 
 std::uint64_t CatalogApiClient::cacheSizeBytes() const {
-    return directorySizeBytes(basePath_ + "cache");
+    return cache_.sizeBytes();
+}
+
+std::uint64_t CatalogApiClient::cacheLimitBytes() const {
+    return cache_.maximumBytes();
 }
 
 bool CatalogApiClient::clearCache(std::string& error) const {
     const std::string cacheRoot = basePath_ + "cache";
-    if (!clearDirectoryContents(cacheRoot)) {
+    if (!cache_.clear()) {
         error = "Nao foi possivel remover todo o cache";
         return false;
     }
@@ -467,8 +423,8 @@ ApiResult CatalogApiClient::loadCache(const std::string& genreSlug, int page,
                                       const std::string& themeSlug,
                                       const std::string& discoverySlug,
                                       const std::string& gameModeSlug) const {
-    const std::string payload = readFile(cachePath(genreSlug, page, query, ordering, status, minRating,
-                                                   themeSlug, discoverySlug, gameModeSlug));
+    const std::string payload = cache_.read(cachePath(genreSlug, page, query, ordering, status, minRating,
+                                                      themeSlug, discoverySlug, gameModeSlug));
     if (payload.empty()) return {false, "Sem cache da API", {}};
     return parseCatalog(payload, "Pagina offline carregada");
 }
@@ -500,8 +456,8 @@ ApiResult CatalogApiClient::synchronize(const std::string& genreSlug, int page,
 
     ApiResult result = parseCatalog(payload, "Pagina IGDB carregada");
     if (!result.success) return result;
-    if (!writeFile(cachePath(genreSlug, page, query, ordering, status, minRating,
-                             themeSlug, discoverySlug, gameModeSlug), payload)) {
+    if (!cache_.write(cachePath(genreSlug, page, query, ordering, status, minRating,
+                                themeSlug, discoverySlug, gameModeSlug), payload)) {
         result.message = "Atualizado, mas nao foi possivel salvar o cache";
     }
     return result;
@@ -512,7 +468,7 @@ bool CatalogApiClient::fetchSimilarGames(const Game& game, std::vector<Game>& si
     if (game.id.rfind("igdb-", 0) != 0) return false;
     const std::string numericId = game.id.substr(5);
     const std::string path = basePath_ + "cache/details/similar-" + numericId + ".json";
-    std::string payload = readFile(path);
+    std::string payload = cache_.read(path);
     if (payload.empty()) {
         if (!initialized_) {
             error = "Rede nao inicializada";
@@ -520,7 +476,7 @@ bool CatalogApiClient::fetchSimilarGames(const Game& game, std::vector<Game>& si
         }
         const std::string url = std::string(kApiBaseUrl) + "/v1/games/" + numericId + "/similar";
         if (!request(url, payload, error, 4 * 1024 * 1024)) return false;
-        writeFile(path, payload);
+        cache_.write(path, payload);
     }
     ApiResult parsed = parseCatalog(payload, "Jogos semelhantes");
     if (!parsed.success) {
@@ -542,14 +498,14 @@ bool CatalogApiClient::ensurePortraitCover(const Game& game, std::string& error)
 bool CatalogApiClient::ensureImage(const std::string& url, const std::string& path,
                                    std::string& error) const {
     if (url.empty() || path.empty()) return false;
-    if (fileExists(path)) return true;
+    if (cache_.contains(path)) return true;
     std::string payload;
     if (!request(url, payload, error, 12 * 1024 * 1024)) return false;
     if (payload.size() < 64) {
         error = "Imagem recebida e invalida";
         return false;
     }
-    if (!writeFile(path, payload)) {
+    if (!cache_.write(path, payload)) {
         error = "Nao foi possivel salvar a capa";
         return false;
     }
@@ -563,11 +519,11 @@ bool CatalogApiClient::fetchDetails(const Game& game, Game& enriched, std::strin
     if (igdbId.empty()) return false;
 
     const std::string path = basePath_ + "cache/details/v3-" + game.id + ".json";
-    std::string payload = readFile(path);
+    std::string payload = cache_.read(path);
     if (payload.empty()) {
         const std::string url = std::string(kApiBaseUrl) + "/v1/games/" + igdbId;
         if (!request(url, payload, error, 6 * 1024 * 1024)) return false;
-        writeFile(path, payload);
+        cache_.write(path, payload);
     }
 
     json_error_t jsonError{};
@@ -670,11 +626,11 @@ bool CatalogApiClient::ensureScreenshots(const Game& game, std::vector<std::stri
         if (imageUrl.empty()) continue;
         const std::string path = basePath_ + "cache/screenshots/" + game.id + "-" +
                                  std::to_string(index) + ".img";
-        if (!fileExists(path)) {
+        if (!cache_.contains(path)) {
             std::string image;
             std::string imageError;
             if (!request(imageUrl, image, imageError, 12 * 1024 * 1024) || image.size() < 64 ||
-                !writeFile(path, image)) {
+                !cache_.write(path, image)) {
                 continue;
             }
         }

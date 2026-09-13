@@ -1723,11 +1723,25 @@ void App::handle(const Input& input) {
         input.nextGenre || input.viewMode || input.favorite || input.backlog ||
         input.surprise || input.sync;
     if (controllerInput && !input.touchActive && !input.touchReleased) {
+        if (touchMode_ && !touchPreviewActive_ && !games_.empty()) {
+            const int touchSelection = selectionForTouchScroll(
+                touchScrollY_, touchGridStride(), gridColumns(), gridRows(),
+                selected_, static_cast<int>(games_.size()));
+            if (touchSelection != selected_) {
+                previousSelected_ = selected_;
+                selected_ = touchSelection;
+                selectionAnimationStart_ = SDL_GetTicks();
+            }
+        }
         touchMode_ = false;
         touchPreviewActive_ = false;
         touchDragTracking_ = false;
     }
     if (input.touchBegan || input.touchActive || input.touchReleased) {
+        if (!touchMode_) {
+            touchScrollY_ = touchScrollForSelection(
+                selected_, touchGridStride(), gridColumns(), gridRows(), maximumTouchScroll());
+        }
         touchMode_ = true;
         updateTouchDrag(input);
     }
@@ -1937,7 +1951,7 @@ void App::render(SDL_Renderer* renderer, TextRenderer& text, ImageRenderer& imag
     if (about_) {
         panelsView_.renderAbout(renderer, text, aboutOption_, networkReady_,
                                 apiInitialized_, initialSyncRunning_, usingApi_,
-                                aboutCacheBytes_, aboutMessage_, aboutConfirmClear_,
+                                aboutCacheBytes_, api_.cacheLimitBytes(), aboutMessage_, aboutConfirmClear_,
                                 aboutUpdateSubtitle());
     }
     layoutView_.renderTabTransition(renderer, tabTransitionStart_, details_, detailClosing_);
